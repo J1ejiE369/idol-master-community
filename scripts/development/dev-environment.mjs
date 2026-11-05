@@ -18,6 +18,12 @@ const defaultWebPort = 5173;
 const loopbackHost = "127.0.0.1";
 const readinessTimeoutMs = 90_000;
 const supportedPlatforms = new Set(["darwin", "linux", "win32"]);
+// Local development opens every Fudaba gate so the exchange, wall and message
+// board are usable without extra setup. The map gate needs a style URL, so the
+// same keyless OpenFreeMap style the deployment example documents is injected
+// when the environment does not name one.
+const defaultFudabaMapStyleUrl =
+  "https://tiles.openfreemap.org/styles/positron";
 
 const localInfrastructureDefaults = Object.freeze({
   IMS_POSTGRES_PORT: "5432",
@@ -180,7 +186,9 @@ function developmentBooleanFlag(environment, name) {
   const value = String(environment[name] || "")
     .trim()
     .toLowerCase();
-  if (!value) return "false";
+  // An unset flag is a local developer who wants the feature, not a deployment
+  // that must stay dark; opt out explicitly with `IMS_DEV_*=false`.
+  if (!value) return "true";
   if (value === "true" || value === "false") return value;
   throw new Error(`${name} must be true or false`);
 }
@@ -298,15 +306,10 @@ function resolveFudabaDevelopmentEnvironment(environment) {
     environment,
     "IMS_DEV_FUDABA_MAP_ENABLED",
   );
-  const mapStyleUrl = developmentMapStyleUrl(environment);
+  const mapStyleUrl =
+    developmentMapStyleUrl(environment) || defaultFudabaMapStyleUrl;
   const mapStyleUrls = developmentMapStyleUrls(environment);
   const geocoding = developmentGeocodingConfig(environment);
-  if (mapEnabled === "true" && !mapStyleUrl) {
-    throw new Error(
-      "IMS_DEV_FUDABA_MAP_STYLE_URL is required when " +
-        "IMS_DEV_FUDABA_MAP_ENABLED=true",
-    );
-  }
   return {
     IMS_FUDABA_PUBLIC_READ_ENABLED: developmentBooleanFlag(
       environment,

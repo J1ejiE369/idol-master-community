@@ -1,3 +1,4 @@
+import type { FudabaMessagesRepository } from '@/ports/repositories/fudaba-messages';
 import type { AuditLogInput } from "@/ports/repositories/admin";
 import type { WikiImageTransform } from "@/ports/repositories/wiki";
 
@@ -855,7 +856,32 @@ export interface ListFudabaPublicCardsInput {
     after?: FudabaPublicCardCursor;
 }
 
+export interface FudabaWallQuery {
+    limit: number;
+    scope: string;
+    bbox?: [number, number, number, number];
+    after?: { pinnedAt: string; id: string };
+    owned?: boolean;
+    cardId?: string;
+}
+
+export interface FudabaPublicWallRecord {
+    office: FudabaPublicOfficeDetailRecord;
+    cursorPosition: { pinnedAt: string; id: string } | null;
+    wall: {
+        layoutVersion: 1;
+        left: number;
+        top: number;
+        right: number;
+        bottom: number;
+        maxZIndex: number;
+        total: number;
+    };
+}
+
 export interface FudabaRepository {
+    readonly messages: FudabaMessagesRepository;
+    findPublicWall(slug: string, viewerAccountId: string | null, query: FudabaWallQuery): Promise<FudabaPublicWallRecord | null>;
     listOfficeReviews(input: { reviewState?: FudabaLocationReviewState; limit: number }): Promise<FudabaOfficeReviewRecord[]>;
     findOfficeReview(officeId: string): Promise<FudabaOfficeReviewRecord | null>;
     beginOfficeReview(input: { officeId: string; expectedRevision: number; operationId: string; expectedReviewState?: 'pending' | 'published' }): Promise<FudabaOfficeReviewResult>;

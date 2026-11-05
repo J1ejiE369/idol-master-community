@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { afterAll, onTestFinished, test } from 'vitest';
 import {
@@ -117,11 +118,15 @@ test.describe('PostgreSQL migration', () => {
                 { version: '20260913120000_platform_email_delivery_jobs', phase: 'post-data' },
                 { version: '20260913130000_platform_email_request_cooldowns', phase: 'post-data' },
                 { version: '20260918120000_platform_oauth_app_exchange', phase: 'post-data' },
+                { version: '20261010120000_fudaba_wall_world', phase: 'post-data' },
+                { version: '20261013120000_fudaba_message_wall_v2', phase: 'post-data' },
                 { version: '20261018120000_namecard_character_catalog', phase: 'post-data' },
                 { version: '20261018150000_namecard_unit_catalog', phase: 'post-data' },
                 { version: '20261018160000_namecard_favorite_characters', phase: 'post-data' },
                 // Kept so the ledger written by the previously deployed release stays reconcilable.
                 { version: '20261018180000_namecard_character_wiki_backfill', phase: 'post-data' },
+                { version: '20261020090000_fudaba_wall_scene', phase: 'post-data' },
+                { version: '20261020100000_fudaba_preview_invalidation', phase: 'post-data' },
                 { version: '20261024130000_namecard_catalog_snapshot', phase: 'post-data' },
                 { version: '20261024140000_namecard_drop_media_rights', phase: 'post-data' },
                 { version: '20261024150000_namecard_notifications', phase: 'post-data' },
@@ -684,7 +689,7 @@ test.describe('PostgreSQL migration', () => {
 
     test('catalog is available without a database connection', () => {
         const catalog = migrationCatalog();
-        assert.equal(catalog.count, 88);
+        assert.equal(catalog.count, 92);
         assert.equal(catalog.migrations[0].version, '0001_initial_compatibility');
         assert.equal(
             catalog.migrations.at(-1).version,
@@ -964,6 +969,78 @@ test.describe('PostgreSQL migration', () => {
     }
 
     test.describe('runner', () => {
+        test('LF and CRLF files share a checksum and parse their phase', async () => {
+            const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'imsweb-migration-eol-'));
+            onTestFinished(() => fs.rmSync(directory, { recursive: true, force: true }));
+            const filename = '0001_initial_compatibility.sql';
+            const sql = '-- ims:migration-phase: pre-data\nSELECT 1;\n';
+            const file = path.join(directory, filename);
+            fs.writeFileSync(file, sql);
+            const lfMigrations = readMigrations(directory);
+            fs.writeFileSync(file, sql.replace(/\n/g, '\r\n'));
+            const crlfMigrations = readMigrations(directory);
+
+            assert.deepEqual(crlfMigrations, lfMigrations);
+            const client = migrationClient(lfMigrations);
+            assert.deepEqual(
+                (await applyMigrations(client, { migrations: crlfMigrations })).executed,
+                []
+            );
+        });
+
+        test('accepts a historical raw CRLF checksum without rerunning SQL', async () => {
+            const [migration] = readMigrations();
+            const legacy = {
+                ...migration,
+                checksum: crypto.createHash('sha256')
+                    .update(migration.sql.replace(/\n/g, '\r\n')).digest('hex')
+            };
+            assert.notEqual(legacy.checksum, migration.checksum);
+            const client = migrationClient([legacy]);
+            const result = await applyMigrations(client, { migrations: [migration] });
+            assert.deepEqual(result.executed, []);
+            assert.equal(client.rows.length, 1);
+            assert.equal(client.rows[0].checksum, legacy.checksum);
+        });
+
+        test('rejects changed SQL behind a historical CRLF checksum', async () => {
+            const [migration] = readMigrations();
+            const legacy = {
+                ...migration,
+                checksum: crypto.createHash('sha256')
+                    .update(migration.sql.replace(/\n/g, '\r\n')).digest('hex')
+            };
+            const sql = migration.sql + 'SELECT 2;\n';
+            const changed = {
+                ...migration,
+                sql,
+                checksum: crypto.createHash('sha256').update(sql).digest('hex')
+            };
+            const client = migrationClient([legacy]);
+            await assert.rejects(
+                applyMigrations(client, { migrations: [changed] }),
+                /Applied PostgreSQL migration drifted/
+            );
+            assert.equal(client.rows.length, 1);
+        });
+
+        test('CRLF compatibility still rejects renamed files and changed phases', async () => {
+            const [migration] = readMigrations();
+            const checksum = crypto.createHash('sha256')
+                .update(migration.sql.replace(/\n/g, '\r\n')).digest('hex');
+            for (const overrides of [
+                { filename: '0001_renamed.sql' },
+                { phase: 'post-data' }
+            ]) {
+                const client = migrationClient([{ ...migration, checksum, ...overrides }]);
+                await assert.rejects(
+                    applyMigrations(client, { migrations: [migration] }),
+                    /Applied PostgreSQL migration drifted/
+                );
+                assert.equal(client.rows.length, 1);
+            }
+        });
+
         test('is repeatable and rejects checksum drift', async () => {
             const client = migrationClient();
             const migrations = readMigrations();
@@ -1019,10 +1096,14 @@ test.describe('PostgreSQL migration', () => {
                 '20260913120000_platform_email_delivery_jobs',
                 '20260913130000_platform_email_request_cooldowns',
                 '20260918120000_platform_oauth_app_exchange',
+                '20261010120000_fudaba_wall_world',
+                '20261013120000_fudaba_message_wall_v2',
                 '20261018120000_namecard_character_catalog',
                 '20261018150000_namecard_unit_catalog',
                 '20261018160000_namecard_favorite_characters',
                 '20261018180000_namecard_character_wiki_backfill',
+                '20261020090000_fudaba_wall_scene',
+                '20261020100000_fudaba_preview_invalidation',
                 '20261024130000_namecard_catalog_snapshot',
                 '20261024140000_namecard_drop_media_rights',
                 '20261024150000_namecard_notifications',

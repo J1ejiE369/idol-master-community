@@ -1,3 +1,4 @@
+import { saveFudabaTinyPreview } from '@/domains/community/fudaba/card-preview';
 import { NAMECARD_MIDDLE_IMAGE_LIMIT } from '@imsweb/contracts/fudaba/runtime';
 import type { Context } from 'hono';
 import type { AppEnvironment } from '@/app';
@@ -259,6 +260,35 @@ export async function handleReplaceFudabaOwnedMedia(
                 : c.json({ success: false, code: 'FUDABA_CARD_NOT_FOUND' }, 404);
         }
         committed = true;
+        // Restore previews invalidated for retained live keys as well as uploads.
+        // Only saved live sides can be shown on the public wall.
+        const bodiesByKey = new Map(
+            uploadedKeys.map((key, index) => [key, uploadedBodies[index]!])
+        );
+        await Promise.all(
+            (['front', 'back'] as const).map(async (side) => {
+                const key = side === 'front'
+                    ? result.card.front_object_key
+                    : result.card.back_object_key;
+                if (!key) return;
+                try {
+                    const body = bodiesByKey.get(key)
+                        ?? (await runtime.storage!.get(key))?.body;
+                    if (!body) return;
+                    await saveFudabaTinyPreview(
+                        repository.messages,
+                        runtime.images!,
+                        key,
+                        body,
+                        { cardId, revision: result.card.revision, side }
+                    );
+                } catch {
+                    console.warn(
+                        '[fudaba] low-resolution preview storage failed; using the skeleton fallback'
+                    );
+                }
+            })
+        );
         // Retain everything the saved card now points at; only the objects this
         // request made irrelevant are deleted. Live artwork of a published card
         // is not part of the edited surface, so it never appears here.

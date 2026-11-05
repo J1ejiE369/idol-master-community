@@ -318,6 +318,7 @@ const portContracts = new Map([
     ],
     ["repositories/platform.ts", ["PlatformAccountRepository"]],
     ["repositories/fudaba.ts", ["FudabaRepository"]],
+    ["repositories/fudaba-messages.ts", ["FudabaMessagesRepository"]],
     ["repositories/namecards.ts", ["NamecardRepository", "ReactionRepository"]],
     [
         "repositories/namecard-characters.ts",

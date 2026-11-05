@@ -1,3 +1,4 @@
+import { saveFudabaTinyPreview } from '@/domains/community/fudaba/card-preview';
 import type { Context } from 'hono';
 import type { AppEnvironment } from '@/app';
 import { fudabaOwnerCardView } from '@/domains/community/fudaba/contracts/card';
@@ -5,7 +6,10 @@ import { parseFudabaCardCreateFields } from '@/domains/community/fudaba/cards/re
 import { storeArtworkThumbnail } from '@/domains/community/fudaba/cards/artwork-thumbnail';
 import { fudabaRepository, services } from '@/middleware/hono-context';
 import type { UploadedFile } from '@/ports/http';
-import type { FudabaCardMutationResult, FudabaCardRecord } from '@/ports/repositories';
+import type {
+    FudabaCardMutationResult,
+    FudabaCardRecord,
+} from '@/ports/repositories';
 import { randomHex } from '@/utils/crypto/random';
 import { messageFromError, statusFromError } from '@/utils/http/error-response';
 import { convertUserImageToWebp } from '@/utils/media/user-image';
@@ -18,9 +22,11 @@ import {
 import { deleteOwnedObjectWithCompensation } from '@/utils/storage/delete-object';
 
 const MAX_CARD_IMAGE_BYTES = 8 * 1024 * 1024;
-const MAX_CARD_REQUEST_BYTES = (MAX_CARD_IMAGE_BYTES * 2) + (128 * 1024);
+const MAX_CARD_REQUEST_BYTES = MAX_CARD_IMAGE_BYTES * 2 + 128 * 1024;
 
-function oneFile(value: UploadedFile | UploadedFile[] | undefined): UploadedFile | null {
+function oneFile(
+    value: UploadedFile | UploadedFile[] | undefined
+): UploadedFile | null {
     return value && !Array.isArray(value) ? value : null;
 }
 
@@ -118,8 +124,8 @@ export async function handleCreateFudabaCard(
                 metadata: {
                     kind: 'fudaba-card-image',
                     side: image.side,
-                    account: c.get('platformUser')!.id
-                }
+                    account: c.get('platformUser')!.id,
+                },
             });
             created.push({ key: image.key, ownerToken });
             const thumbnail = await storeArtworkThumbnail(runtime, {
@@ -134,6 +140,33 @@ export async function handleCreateFudabaCard(
         const now = new Date().toISOString();
         const ownerAccountId = c.get('platformUser')!.id;
         const repository = fudabaRepository(c);
+        const storePreviews = async (revision: number) => {
+            try {
+                await Promise.all([
+                    saveFudabaTinyPreview(
+                        repository.messages,
+                        runtime.images!,
+                        frontKey,
+                        frontImage.body,
+                        { cardId, revision, side: 'front' }
+                    ),
+                    ...(backKey && backImage
+                        ? [saveFudabaTinyPreview(
+                            repository.messages,
+                            runtime.images!,
+                            backKey,
+                            backImage.body,
+                            { cardId, revision, side: 'back' }
+                        )]
+                        : []),
+                ]);
+            } catch {
+                console.warn(
+                    '[fudaba] low-resolution preview storage failed; using the skeleton fallback'
+                );
+            }
+        };
+
         cleanupCreatedObjects = false;
         let result: FudabaCardMutationResult;
         try {
@@ -146,12 +179,15 @@ export async function handleCreateFudabaCard(
                 middleObjectKeys: middleKeys,
                 accent,
                 createdAt: now,
-                updatedAt: now
+                updatedAt: now,
             });
         } catch (error) {
             let recovered: FudabaCardRecord | null | undefined;
             try {
-                recovered = await repository.findCardForOwner(cardId, ownerAccountId);
+                recovered = await repository.findCardForOwner(
+                    cardId,
+                    ownerAccountId
+                );
             } catch (recoveryError) {
                 console.error(
                     'Unable to reconcile an uncertain Fudaba card creation',
@@ -162,35 +198,60 @@ export async function handleCreateFudabaCard(
                 recovered?.front_object_key === frontKey &&
                 recovered.back_object_key === backKey
             ) {
-                return c.json({
-                    success: true,
-                    card: fudabaOwnerCardView(recovered)
-                }, 201);
+                await storePreviews(recovered.revision);
+                return c.json(
+                    {
+                        success: true,
+                        card: fudabaOwnerCardView(recovered),
+                    },
+                    201
+                );
             }
             throw error;
         }
         if (result.status !== 'saved') {
             cleanupCreatedObjects = true;
-            await Promise.all(created.map(({ key, ownerToken }) =>
-                deleteOwnedObjectWithCompensation(runtime, key, ownerToken)
-            ));
-            return c.json({ success: false, code: 'FUDABA_CARD_UNAVAILABLE' }, 409);
+            await Promise.all(
+                created.map(({ key, ownerToken }) =>
+                    deleteOwnedObjectWithCompensation(runtime, key, ownerToken)
+                )
+            );
+            return c.json(
+                { success: false, code: 'FUDABA_CARD_UNAVAILABLE' },
+                409
+            );
         }
         cleanupCreatedObjects = false;
-        return c.json({ success: true, card: fudabaOwnerCardView(result.card) }, 201);
+        await storePreviews(result.card.revision);
+        return c.json(
+            { success: true, card: fudabaOwnerCardView(result.card) },
+            201
+        );
     } catch (error) {
         if (cleanupCreatedObjects) {
-            await Promise.all(created.map(({ key, ownerToken }) =>
-                deleteOwnedObjectWithCompensation(runtime, key, ownerToken)
-                    .catch(() => undefined)
-            ));
+            await Promise.all(
+                created.map(({ key, ownerToken }) =>
+                    deleteOwnedObjectWithCompensation(
+                        runtime,
+                        key,
+                        ownerToken
+                    ).catch(() => undefined)
+                )
+            );
         }
         const status = statusFromError(error);
         if (status >= 500) console.error('Failed to create Fudaba card', error);
-        return c.json({
-            success: false,
-            code: status >= 500 ? 'FUDABA_CARD_CREATE_FAILED' : 'FUDABA_CARD_INVALID',
-            message: status >= 500 ? '名片创建失败' : messageFromError(error)
-        }, status as 400 | 413 | 500);
+        return c.json(
+            {
+                success: false,
+                code:
+                    status >= 500
+                        ? 'FUDABA_CARD_CREATE_FAILED'
+                        : 'FUDABA_CARD_INVALID',
+                message:
+                    status >= 500 ? '名片创建失败' : messageFromError(error),
+            },
+            status as 400 | 413 | 500
+        );
     }
 }

@@ -135,25 +135,53 @@ test.describe('route inventory compiler', () => {
     const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
     const collected = collectRouteInventory(repositoryRoot);
     const current = routeInventoryArtifact(collected);
+  for (const suffix of ['wall-layout', 'wall-scene']) {
+    const route = current.routes.find((route) => route.method === 'GET' && route.path === `/api/community/exchange/offices/:slug/${suffix}`);
+    assert.ok(route, `${suffix} is registered`);
+    const param = route.carriers.find((carrier) => carrier.kind === 'param');
+    const query = route.carriers.find((carrier) => carrier.kind === 'query');
+    assert.equal(param?.syntaxPolicy, 'reject');
+    assert.equal(param?.schemaSymbol, 'fudabaMessageSlugParamsSchema');
+    assert.equal(query?.policy, 'reject');
+    assert.equal(query?.schemaModule, '@imsweb/contracts/fudaba/messages');
+    assert.equal(query?.schemaSymbol, 'fudabaMixedWallQuerySchema');
+  }
+
+    const messageRoutes = current.routes.filter(route => (route.path.startsWith('/api/community/exchange/') || route.path.startsWith('/api/admin/community/exchange/')) && (route.path.includes('/messages') || route.path.endsWith('/mixed-wall')));
+    assert.equal(messageRoutes.length, 11);
+    for (const route of messageRoutes) {
+      for (const carrier of route.carriers) {
+        if (carrier.kind === 'param') assert.equal(carrier.syntaxPolicy, 'reject', `${route.method} ${route.path} strict params`);
+        else assert.equal(carrier.policy, 'reject', `${route.method} ${route.path} strict ${carrier.kind}`);
+      }
+    }
+
     const artifact = JSON.parse(fs.readFileSync(
       path.join(repositoryRoot, "scripts/contracts/current-wire-contract-inventory.json"),
       "utf8",
     ));
 
+    // The combined office-wall and directory APIs retain every request and response.
     assert.deepEqual(current.counts, {
-      mountedRegistrations: 388,
-      mountedMethodPaths: 292,
+      mountedRegistrations: 403,
+      mountedMethodPaths: 307,
       noInputRoutes: 96,
-      requestCarriers: 384,
+      requestCarriers: 410,
       policies: {
-        reject: 75,
+        reject: 88,
         "accept-and-project": 206,
         passthrough: 17,
-        "non-object-applicable": 86,
+        "non-object-applicable": 99,
       },
-      responses: { total: 838, json: 761, nonJson: 77 },
+      responses: { total: 842, json: 765, nonJson: 77 },
       unresolved: 0,
     });
+    const wallRead = current.routes.find((route) => route.method === "GET"
+      && route.path === "/api/community/exchange/offices/:officeSlug/wall");
+    const worldWrite = current.routes.find((route) => route.method === "PUT"
+      && route.path === "/api/community/exchange/offices/:officeId/cards/:cardId/world-placement");
+    assert.equal(wallRead?.carriers.find((carrier) => carrier.kind === "query")?.policy, "reject");
+    assert.equal(worldWrite?.carriers.find((carrier) => carrier.kind === "json")?.policy, "reject");
     assert.deepEqual(current, artifact);
   });
 

@@ -1046,7 +1046,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
             position_x: 12.5,
             position_y: 87.25,
             rotation: -4.5,
-            z_index: 8,
+            z_index: 1,
             revision: 0,
             updated_at: CREATED_AT
         });
@@ -1104,7 +1104,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
             position_x: 100,
             position_y: 0,
             rotation: 12,
-            z_index: 999,
+            z_index: 2,
             revision: 1,
             updated_at: UPDATED_AT
         });
@@ -1478,6 +1478,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
     function placementBody(expectedRevision: number | null): Record<string, unknown> {
         return {
+            layoutVersion: 1,
             x: 25.5,
             y: 74.5,
             rotation: -3,
@@ -1488,10 +1489,22 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
     function path(cardId = CARD_ID): string {
         return `/api/community/exchange/offices/${OFFICE_ID}` +
-            `/cards/${cardId}/placement`;
+            `/cards/${cardId}/world-placement`;
     }
 
     test.describe('card placement', () => {
+        test('legacy percentage writes fail with a layout conflict without changing a placement', async () => {
+            const fixture = new PlacementRouteFixture();
+            const response = await fixture.app.request('http://ims.test' + path().replace('/world-placement', '/placement'), {
+                method: 'PUT',
+                headers: bearerHeaders({ 'content-type': 'application/json' }),
+                body: JSON.stringify({ x: 50, y: 50, rotation: 0, zIndex: 1, expectedRevision: null })
+            });
+            assert.equal(response.status, 409);
+            assert.equal((await response.json() as { code: string }).code, 'FUDABA_WALL_LAYOUT_CONFLICT');
+            assert.equal(fixture.placements.size, 0);
+        });
+
         test('routes enforce write gate, Platform auth, active status, CSRF, and rate limit',
             async () => {
                 const disabled = new PlacementRouteFixture({ writeEnabled: false });
@@ -1525,7 +1538,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
                 const limited = new PlacementRouteFixture();
                 limited.rateLimiter.deniedBuckets.add('platform-write-account');
-                assert.equal((await limited.app.request(`http://ims.test${path()}`, {
+                assert.equal((await limited.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 0 })
@@ -1574,8 +1587,8 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                 assert.equal((await duplicate.json() as { revision: number }).revision, 0);
 
                 for (const invalid of [
-                    { ...placementBody(0), x: -0.01 },
-                    { ...placementBody(0), y: 100.01 },
+                    { ...placementBody(0), x: -1_000_000.01 },
+                    { ...placementBody(0), y: 1_000_000.01 },
                     { ...placementBody(0), rotation: 12.01 },
                     { ...placementBody(0), zIndex: 1.5 },
                     { ...placementBody(0), expectedRevision: '0' },
@@ -1601,6 +1614,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                     method: 'PUT',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({
+                        layoutVersion: 1,
                         x: 0,
                         y: 100,
                         rotation: 12,
@@ -1688,7 +1702,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                 assert.equal(closedUpdate.status, 404);
                 assert.deepEqual(await closedUpdate.json(), notFound);
 
-                const removed = await fixture.app.request(`http://ims.test${path()}`, {
+                const removed = await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 0 })
@@ -1709,21 +1723,21 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                     body: JSON.stringify(placementBody(null))
                 })).status, 201);
 
-                const stale = await fixture.app.request(`http://ims.test${path()}`, {
+                const stale = await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 2 })
                 });
                 assert.equal(stale.status, 409);
                 assert.equal((await stale.json() as { revision: number }).revision, 0);
-                assert.equal((await fixture.app.request(`http://ims.test${path()}`, {
+                assert.equal((await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: '0' })
                 })).status, 400);
 
                 fixture.inUse = true;
-                const inUse = await fixture.app.request(`http://ims.test${path()}`, {
+                const inUse = await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 0 })
@@ -1736,7 +1750,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                 });
 
                 fixture.inUse = false;
-                const removed = await fixture.app.request(`http://ims.test${path()}`, {
+                const removed = await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: {
                         ...cookieHeaders(true),
@@ -1749,7 +1763,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                     success: true,
                     revision: 1
                 });
-                assert.equal((await fixture.app.request(`http://ims.test${path()}`, {
+                assert.equal((await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 1 })
@@ -8548,6 +8562,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
         test('one ordered submit replaces an image and moves another across roles', async () => {
             const fixture = new OwnerRouteFixture();
+            fixture.images.resizeJpeg = async () => new Uint8Array([0xff, 0xd8]);
             const base = 'protected/fudaba/cards/owner-card/versions';
             const live = ownerCard({
                 publication_status: 'published',
@@ -8592,10 +8607,24 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
             assert.equal(fixture.cards.get('owner-card')?.revision,
                 live.revision + 1);
             assert.equal(JSON.stringify(body).includes('object_key'), false);
+            // Public previews continue to describe the approved live artwork.
+            assert.deepEqual(new Set(fixture.mediaPreviews.keys()), new Set([
+                live.front_object_key,
+                live.back_object_key
+            ]));
+            for (const entry of fixture.mediaPreviews.values()) {
+                assert.match(entry.preview ?? '', /^data:image\/webp;base64,/);
+            }
+            assert.equal(fixture.mediaPreviews.has(uploadedKey), false);
+            assert.equal(
+                fixture.mediaPreviews.has(live.middle_object_keys[1]!),
+                false
+            );
         });
 
-        test('the ordered submit drops artwork the card no longer points at', async () => {
+        test('the ordered submit drops unused artwork and restores previews after reordering retained artwork', async () => {
             const fixture = new OwnerRouteFixture();
+            fixture.images.resizeJpeg = async () => new Uint8Array([0xff, 0xd8]);
             const live = fixture.cards.get('owner-card')!;
             const unrelated = 'protected/fudaba/cards/owner-card/versions/draft/middle-2.webp';
             fixture.cards.set('owner-card', {
@@ -8625,6 +8654,40 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
             // Only the old back drops out: the two middle pages stay referenced
             // and the second one now closes the list as the back.
             assert.deepEqual(fixture.storage.deletes, [live.back_object_key]);
+            assert.deepEqual(new Set(fixture.mediaPreviews.keys()), new Set([
+                live.front_object_key,
+                unrelated
+            ]));
+
+            // Start with no cached preview, as after database invalidation.
+            // This submit only reorders retained artwork and uploads nothing.
+            fixture.mediaPreviews.clear();
+            const putsBeforeReorder = fixture.storage.puts.length;
+            fixture.uploads.next = {
+                fields: {
+                    order: JSON.stringify(['#3', '#2', '#1', '#0']),
+                    expectedRevision: String(live.revision + 1)
+                },
+                files: {}
+            };
+            const reordered = await fixture.app.request(
+                'http://ims.test/api/community/exchange/me/cards/owner-card/media',
+                { method: 'PUT', headers: bearerHeaders(), body: new FormData() }
+            );
+            assert.equal(reordered.status, 200);
+            assert.equal(fixture.storage.puts.length, putsBeforeReorder);
+            assert.equal(fixture.cards.get('owner-card')?.front_object_key, unrelated);
+            assert.equal(
+                fixture.cards.get('owner-card')?.back_object_key,
+                live.front_object_key
+            );
+            assert.deepEqual(new Set(fixture.mediaPreviews.keys()), new Set([
+                unrelated,
+                live.front_object_key
+            ]));
+            for (const entry of fixture.mediaPreviews.values()) {
+                assert.match(entry.preview ?? '', /^data:image\/webp;base64,/);
+            }
         });
 
         test('the ordered submit refuses slots the card does not have', async () => {
@@ -11272,7 +11335,6 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
 // fudaba-public-routes.test.ts
 {
-    const NOW = Date.now();
     const CREATED_AT = "2026-08-02T00:00:00.000Z";
 
     class PublicMediaStorage implements ObjectStorage {
@@ -11493,6 +11555,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
         } = {},
     ): RuntimeServices {
         const status = options.accountStatus ?? "active";
+        const now = Date.now();
         return {
             fudaba: fudaba.repository,
             namecardCharacters: fudaba.characters,
@@ -11514,8 +11577,8 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                         sessionId: "platform-session",
                         csrfSecret: "csrf-secret",
                         jti: "access-token",
-                        iat: Math.floor(Date.now() / 1000),
-                        exp: Math.floor(Date.now() / 1000) + 300,
+                        iat: Math.floor(now / 1000),
+                        exp: Math.floor(now / 1000) + 300,
                     };
                 },
             },
@@ -11527,9 +11590,9 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                         token_hash: "hash",
                         previous_token_hash: null,
                         csrf_hash: "csrf-hash",
-                        expires_at: Date.now() + 60_000,
-                        created_at: NOW,
-                        updated_at: NOW,
+                        expires_at: now + 60_000,
+                        created_at: now,
+                        updated_at: now,
                         revoked_at: null,
                     };
                 },
@@ -11539,9 +11602,9 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                             id: "platform-viewer",
                             status,
                             token_version: 0,
-                            created_at: NOW,
-                            updated_at: NOW,
-                            deleted_at: status === "deleted" ? NOW : null,
+                            created_at: now,
+                            updated_at: now,
+                            deleted_at: status === "deleted" ? now : null,
                         },
                         profile: {
                             account_id: "platform-viewer",
@@ -11550,7 +11613,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                             avatar_external_url: null,
                             home_city: null,
                             bio: "",
-                            updated_at: NOW,
+                            updated_at: now,
                         },
                     };
                 },

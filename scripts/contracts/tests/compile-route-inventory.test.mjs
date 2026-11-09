@@ -141,17 +141,17 @@ test.describe('route inventory compiler', () => {
     ));
 
     assert.deepEqual(current.counts, {
-      mountedRegistrations: 407,
-      mountedMethodPaths: 308,
+      mountedRegistrations: 422,
+      mountedMethodPaths: 323,
       noInputRoutes: 99,
-      requestCarriers: 408,
+      requestCarriers: 434,
       policies: {
-        reject: 89,
+        reject: 102,
         "accept-and-project": 217,
         passthrough: 17,
-        "non-object-applicable": 85,
+        "non-object-applicable": 98,
       },
-      responses: { total: 865, json: 783, nonJson: 82 },
+      responses: { total: 869, json: 787, nonJson: 82 },
       unresolved: 0,
     });
     assert.deepEqual(current.baseline, {
@@ -170,6 +170,32 @@ test.describe('route inventory compiler', () => {
       { module: "@imsweb/contracts/catalog", symbol: "adminCatalogGroupKindRequestSchema", kind: "json", method: "PUT", path: "/api/admin/catalog/group-kind", carriers: 1, policy: "reject", actualCarriers: 1 },
       { module: "@imsweb/contracts/catalog", symbol: "adminCatalogBindingRequestSchema", kind: "json", method: "PUT", path: "/api/admin/catalog/wiki-bindings", carriers: 1, policy: "reject", actualCarriers: 1 },
       { module: "@imsweb/contracts/catalog", symbol: "adminCatalogProfileImageParamsSchema", kind: "param", method: "GET", path: "/api/admin/catalog/profile-images/:kind/:id", carriers: 1, policy: "accept-and-project", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageIdParamsSchema", kind: "param", method: "DELETE", path: "/api/community/exchange/messages/:messageId", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageListQuerySchema", kind: "query", method: "GET", path: "/api/admin/community/exchange/messages", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageListQuerySchema", kind: "query", method: "GET", path: "/api/community/exchange/me/messages", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageIdParamsSchema", kind: "param", method: "GET", path: "/api/community/exchange/messages/:messageId", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageOfficeParamsSchema", kind: "param", method: "GET", path: "/api/community/exchange/offices/:officeId/messages", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageListQuerySchema", kind: "query", method: "GET", path: "/api/community/exchange/offices/:officeId/messages", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba", symbol: "fudabaOfficeSlugParamsSchema", kind: "param", method: "GET", path: "/api/community/exchange/offices/:officeSlug/wall", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/wall", symbol: "fudabaWallQuerySchema", kind: "query", method: "GET", path: "/api/community/exchange/offices/:officeSlug/wall", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageSlugParamsSchema", kind: "param", method: "GET", path: "/api/community/exchange/offices/:slug/mixed-wall", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMixedWallQuerySchema", kind: "query", method: "GET", path: "/api/community/exchange/offices/:slug/mixed-wall", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageSlugParamsSchema", kind: "param", method: "GET", path: "/api/community/exchange/offices/:slug/wall-layout", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMixedWallQuerySchema", kind: "query", method: "GET", path: "/api/community/exchange/offices/:slug/wall-layout", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageSlugParamsSchema", kind: "param", method: "GET", path: "/api/community/exchange/offices/:slug/wall-scene", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMixedWallQuerySchema", kind: "query", method: "GET", path: "/api/community/exchange/offices/:slug/wall-scene", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageOfficeParamsSchema", kind: "param", method: "POST", path: "/api/community/exchange/offices/:officeId/messages", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageCreateRequestSchema", kind: "json", method: "POST", path: "/api/community/exchange/offices/:officeId/messages", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageIdParamsSchema", kind: "param", method: "PUT", path: "/api/admin/community/exchange/messages/:messageId/moderation", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageModerationRequestSchema", kind: "json", method: "PUT", path: "/api/admin/community/exchange/messages/:messageId/moderation", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageIdParamsSchema", kind: "param", method: "PUT", path: "/api/community/exchange/messages/:messageId", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageEditRequestSchema", kind: "json", method: "PUT", path: "/api/community/exchange/messages/:messageId", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageIdParamsSchema", kind: "param", method: "PUT", path: "/api/community/exchange/messages/:messageId/office-moderation", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageModerationRequestSchema", kind: "json", method: "PUT", path: "/api/community/exchange/messages/:messageId/office-moderation", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessageIdParamsSchema", kind: "param", method: "PUT", path: "/api/community/exchange/messages/:messageId/placement", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/messages", symbol: "fudabaMessagePlacementRequestSchema", kind: "json", method: "PUT", path: "/api/community/exchange/messages/:messageId/placement", carriers: 1, policy: "reject", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba", symbol: "fudabaCardOfficePlacementParamsSchema", kind: "param", method: "PUT", path: "/api/community/exchange/offices/:officeId/cards/:cardId/world-placement", carriers: 1, policy: "non-object-applicable", actualCarriers: 1 },
+      { module: "@imsweb/contracts/fudaba/wall", symbol: "fudabaWorldPlacementRequestSchema", kind: "json", method: "PUT", path: "/api/community/exchange/offices/:officeId/cards/:cardId/world-placement", carriers: 1, policy: "reject", actualCarriers: 1 },
     ]);
     assert.deepEqual(current, artifact);
   });

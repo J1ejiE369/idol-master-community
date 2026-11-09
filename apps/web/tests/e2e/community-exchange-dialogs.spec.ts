@@ -8,6 +8,7 @@ import type {
 } from "@imsweb/contracts/fudaba"
 import { makeCharacterCatalog } from "./fixtures/fudaba-characters"
 import { installPlatformOAuthProvidersMock } from "./fixtures/platform-auth"
+import { installOfficePageDefaults } from "./fixtures/office-page-defaults"
 import { settleToasts } from "./fixtures/toast"
 
 const office = {
@@ -34,6 +35,7 @@ async function installDialogApis(
   publicName = () => office.name
 ) {
   await installEmptyWikiCatalogMock(api, { min: 0, max: 8 })
+  installOfficePageDefaults(api, office.slug, office)
   await api.mockRoute(
     "/api/community/exchange/series",
     (route) => route.fulfill({ json: { items: [] } }),

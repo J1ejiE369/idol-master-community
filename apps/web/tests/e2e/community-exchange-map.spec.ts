@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright"
 import { api, expect, test } from "./fixtures/test"
 
 import { installBrowserIconMock } from "./fixtures/homepage"
+import { installOfficePageDefaults } from "./fixtures/office-page-defaults"
 
 const series = {
   items: [
@@ -140,6 +141,7 @@ test.beforeEach(async ({ page, api }, testInfo) => {
     "GET",
     { min: 0, max: 1 }
   )
+  installOfficePageDefaults(api, directoryOffice.slug, directoryOffice)
   await api.mockRoute(
     "**/api/community/exchange/offices/shanghai-weekend",
     async (route) => {

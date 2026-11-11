@@ -8,20 +8,16 @@
 import {
     bearerTokenHeaders,
     cookieCsrfHeaders,
-    fixtureSha256Hex as csrfHash
+    fixtureSha256Hex as csrfHash,
 } from './auth-request';
 export { fixtureSha256Hex as csrfHash } from './auth-request';
 import { createHonoApp } from '@/app';
 import {
     PLATFORM_ACCESS_TOKEN_COOKIE,
-    PLATFORM_CSRF_TOKEN_COOKIE
+    PLATFORM_CSRF_TOKEN_COOKIE,
 } from '@/domains/identity/platform-auth/contracts/session';
 import type { RateLimiter } from '@/ports/cache';
-import type {
-    ParsedUpload,
-    UploadParser,
-    UploadedFile
-} from '@/ports/http';
+import type { ParsedUpload, UploadParser, UploadedFile } from '@/ports/http';
 import type { ImageInfo, ImageProcessor } from '@/ports/media';
 import type {
     CompensationService,
@@ -30,7 +26,7 @@ import type {
     ObjectReadUrlOptions,
     ObjectStorage,
     PutObjectOptions,
-    StoredObject
+    StoredObject,
 } from '@/ports/object-storage';
 import type {
     CreateNamecardFeedbackInput,
@@ -68,7 +64,9 @@ export function uploadedFile(
     return { filename, contentType, body };
 }
 
-export function ownerCard(overrides: Partial<FudabaCardRecord> = {}): FudabaCardRecord {
+export function ownerCard(
+    overrides: Partial<FudabaCardRecord> = {}
+): FudabaCardRecord {
     return {
         id: 'owner-card',
         card_number: 1,
@@ -105,7 +103,7 @@ export function ownerCard(overrides: Partial<FudabaCardRecord> = {}): FudabaCard
         updated_at: CREATED_AT,
         deleted_at: null,
         ...overrides,
-        origin: overrides.origin ?? 'exchange'
+        origin: overrides.origin ?? 'exchange',
     };
 }
 
@@ -129,7 +127,7 @@ export function cardUpload(
 ): ParsedUpload {
     return {
         fields: cardFields(),
-        files: { front, back }
+        files: { front, back },
     };
 }
 
@@ -154,17 +152,21 @@ export class ControlledUploadParser implements UploadParser {
 }
 
 export class SniffingImageProcessor implements ImageProcessor {
-    readonly validations: Array<{ body: Uint8Array; declaredType?: string }> = [];
+    readonly validations: Array<{ body: Uint8Array; declaredType?: string }> =
+        [];
     readonly conversions: Uint8Array[] = [];
 
-    async validate(body: Uint8Array, declaredType?: string): Promise<ImageInfo> {
+    async validate(
+        body: Uint8Array,
+        declaredType?: string
+    ): Promise<ImageInfo> {
         this.validations.push({ body, declaredType });
         if (body[0] === 0xff) {
             return {
                 format: 'jpeg',
                 width: 1200,
                 height: 800,
-                contentType: 'image/jpeg'
+                contentType: 'image/jpeg',
             };
         }
         if (body[0] === 0x89) {
@@ -172,7 +174,7 @@ export class SniffingImageProcessor implements ImageProcessor {
                 format: 'png',
                 width: 800,
                 height: 1200,
-                contentType: 'image/png'
+                contentType: 'image/png',
             };
         }
         if (body[0] === 0x52) {
@@ -180,7 +182,7 @@ export class SniffingImageProcessor implements ImageProcessor {
                 format: 'webp',
                 width: 1000,
                 height: 1000,
-                contentType: 'image/webp'
+                contentType: 'image/webp',
             };
         }
         throw new Error('undecodable image');
@@ -224,9 +226,9 @@ export class ProtectedMemoryStorage implements ObjectStorage {
                 body,
                 size: body.byteLength,
                 contentType: 'image/webp',
-                etag: `seed-${key}`
+                etag: `seed-${key}`,
             },
-            options: { contentType: 'image/webp', protectedAccess: true }
+            options: { contentType: 'image/webp', protectedAccess: true },
         });
     }
 
@@ -241,9 +243,9 @@ export class ProtectedMemoryStorage implements ObjectStorage {
         this.readUrls.push({ key, method: options?.method });
         return this.objects.has(key)
             ? {
-                url: `https://private-media.example.test/${encodeURIComponent(key)}?signed=1`,
-                visibility: 'private'
-            }
+                  url: `https://private-media.example.test/${encodeURIComponent(key)}?signed=1`,
+                  visibility: 'private',
+              }
             : null;
     }
 
@@ -272,7 +274,7 @@ export class ProtectedMemoryStorage implements ObjectStorage {
             body,
             size: body.byteLength,
             contentType: options.contentType || 'application/octet-stream',
-            etag: `etag-${this.puts.length}`
+            etag: `etag-${this.puts.length}`,
         };
         this.objects.set(key, { stored, options });
         return stored;
@@ -313,7 +315,7 @@ export class ProtectedMemoryStorage implements ObjectStorage {
             .map(([key, value]) => ({
                 key,
                 size: value.stored.size,
-                etag: value.stored.etag
+                etag: value.stored.etag,
             }));
     }
 
@@ -325,9 +327,17 @@ export class ProtectedMemoryStorage implements ObjectStorage {
 }
 
 export class RecordingCompensation implements CompensationService {
-    readonly enqueued: Array<{ kind: string; payload: unknown; error?: unknown }> = [];
+    readonly enqueued: Array<{
+        kind: string;
+        payload: unknown;
+        error?: unknown;
+    }> = [];
 
-    async enqueue(kind: string, payload: unknown, error?: unknown): Promise<string> {
+    async enqueue(
+        kind: string,
+        payload: unknown,
+        error?: unknown
+    ): Promise<string> {
         this.enqueued.push({ kind, payload, error });
         return `compensation-${this.enqueued.length}`;
     }
@@ -349,7 +359,7 @@ export class ControlledRateLimiter implements RateLimiter {
         return {
             allowed,
             remaining: allowed ? Math.max(0, limit - 1) : 0,
-            resetAt: Date.now() + 60_000
+            resetAt: Date.now() + 60_000,
         };
     }
 }
@@ -373,7 +383,7 @@ export class OwnerRouteFixture {
         avatar_external_url: null,
         home_city: 'Shanghai',
         bio: 'Profile bio',
-        updated_at: 1_000
+        updated_at: 1_000,
     };
     readonly session = {
         id: 'platform-session',
@@ -384,7 +394,7 @@ export class OwnerRouteFixture {
         expires_at: Date.now() + 60 * 60 * 1000,
         created_at: Date.now(),
         updated_at: Date.now(),
-        revoked_at: null as number | null
+        revoked_at: null as number | null,
     };
     readonly cards = new Map<string, FudabaCardRecord>();
     readonly uploads = new ControlledUploadParser();
@@ -426,7 +436,7 @@ export class OwnerRouteFixture {
             id: 'other-card',
             owner_account_id: OTHER_ACCOUNT_ID,
             front_object_key: 'protected/fudaba/cards/other-card/front.webp',
-            back_object_key: 'protected/fudaba/cards/other-card/back.webp'
+            back_object_key: 'protected/fudaba/cards/other-card/back.webp',
         });
         this.cards.set(card.id, card);
         this.cards.set(other.id, other);
@@ -445,9 +455,9 @@ export class OwnerRouteFixture {
                 token_version: 0,
                 created_at: 500,
                 updated_at: 500,
-                deleted_at: this.accountStatus === 'deleted' ? 500 : null
+                deleted_at: this.accountStatus === 'deleted' ? 500 : null,
             },
-            profile: { ...this.profile }
+            profile: { ...this.profile },
         };
     }
 
@@ -455,18 +465,24 @@ export class OwnerRouteFixture {
         findRefreshSessionById: async (id: string) =>
             id === this.session.id ? { ...this.session } : null,
         findAccountWithProfileById: async (id: string) => {
-            if (this.profileMutationCommitted && this.failProfileConfirmationRead) {
+            if (
+                this.profileMutationCommitted &&
+                this.failProfileConfirmationRead
+            ) {
                 throw new Error('profile confirmation read failed');
             }
             return id === ACCOUNT_ID ? this.identity() : null;
         },
-        updateProfileTextForOwner: async (input: UpdatePlatformProfileTextInput) => {
+        updateProfileTextForOwner: async (
+            input: UpdatePlatformProfileTextInput
+        ) => {
             this.profileTextInputs.push(input);
-            if (this.accountStatus !== 'active') return { status: 'unavailable' as const };
+            if (this.accountStatus !== 'active')
+                return { status: 'unavailable' as const };
             if (input.expectedUpdatedAt !== this.profile.updated_at) {
                 return {
                     status: 'conflict' as const,
-                    updatedAt: this.profile.updated_at
+                    updatedAt: this.profile.updated_at,
                 };
             }
             this.profile = {
@@ -474,21 +490,24 @@ export class OwnerRouteFixture {
                 display_name: input.displayName,
                 home_city: input.homeCity,
                 bio: input.bio,
-                updated_at: input.updatedAt
+                updated_at: input.updatedAt,
             };
             return {
                 status: 'saved' as const,
                 profile: { ...this.profile },
-                previousAvatarObjectKey: this.profile.avatar_object_key
+                previousAvatarObjectKey: this.profile.avatar_object_key,
             };
         },
-        updateProfileAvatarForOwner: async (input: UpdatePlatformProfileAvatarInput) => {
+        updateProfileAvatarForOwner: async (
+            input: UpdatePlatformProfileAvatarInput
+        ) => {
             this.profileAvatarInputs.push(input);
-            if (this.accountStatus !== 'active') return { status: 'unavailable' as const };
+            if (this.accountStatus !== 'active')
+                return { status: 'unavailable' as const };
             if (input.expectedUpdatedAt !== this.profile.updated_at) {
                 return {
                     status: 'conflict' as const,
-                    updatedAt: this.profile.updated_at
+                    updatedAt: this.profile.updated_at,
                 };
             }
             const previousAvatarObjectKey = this.profile.avatar_object_key;
@@ -496,7 +515,7 @@ export class OwnerRouteFixture {
                 ...this.profile,
                 avatar_object_key: input.avatarObjectKey,
                 avatar_external_url: null,
-                updated_at: input.updatedAt
+                updated_at: input.updatedAt,
             };
             if (this.updateAvatarMode === 'mutate-then-throw') {
                 this.profileMutationCommitted = true;
@@ -505,30 +524,46 @@ export class OwnerRouteFixture {
             return {
                 status: 'saved' as const,
                 profile: { ...this.profile },
-                previousAvatarObjectKey
+                previousAvatarObjectKey,
             };
         },
-        revokeRefreshSession: async () => true
+        revokeRefreshSession: async () => true,
     } as unknown as PlatformAccountRepository;
 
+    readonly mediaPreviews = new Map<
+        string,
+        { hash: string; preview: string | null }
+    >();
     readonly fudaba = {
         listOwnerSeries: () => this.fudaba.listPublicSeries(),
-        listPublicSeries: async () => [{
-            id: 1,
-            code: '765',
-            display_name: '765PRO',
-            color: '#f34f6d',
-            display_order: 0,
-            icon_object_key: null,
-            image_transform: {
-                fit: 'contain' as const,
-                focalX: 0.5,
-                focalY: 0.5,
-                zoom: 1,
-                rotation: 0 as const
+        messages: {
+            saveMediaPreview: async (
+                key: string,
+                hash: string,
+                preview: string | null
+            ) => {
+                this.mediaPreviews.set(key, { hash, preview });
+                return true;
             },
-            active_office_count: 0
-        }],
+        },
+        listPublicSeries: async () => [
+            {
+                id: 1,
+                code: '765',
+                display_name: '765PRO',
+                color: '#f34f6d',
+                display_order: 0,
+                icon_object_key: null,
+                image_transform: {
+                    fit: 'contain' as const,
+                    focalX: 0.5,
+                    focalY: 0.5,
+                    zoom: 1,
+                    rotation: 0 as const,
+                },
+                active_office_count: 0,
+            },
+        ],
         listPublicOffices: async () => [],
         findPublicOfficeBySlug: async () => null,
         listPublicCards: async () => [],
@@ -556,8 +591,10 @@ export class OwnerRouteFixture {
             input: CreateOwnedFudabaCardInput
         ): Promise<FudabaCardMutationResult> => {
             this.createInputs.push(input);
-            if (this.createMode === 'throw') throw new Error('repository write failed');
-            if (this.createMode === 'unavailable') return { status: 'unavailable' };
+            if (this.createMode === 'throw')
+                throw new Error('repository write failed');
+            if (this.createMode === 'unavailable')
+                return { status: 'unavailable' };
             const card = ownerCard({
                 id: input.id,
                 owner_account_id: input.ownerAccountId,
@@ -577,14 +614,18 @@ export class OwnerRouteFixture {
                 credits: input.credits,
                 revision: 0,
                 created_at: input.createdAt,
-                updated_at: input.updatedAt
+                updated_at: input.updatedAt,
             });
             this.cards.set(card.id, card);
             if (this.createMode === 'mutate-then-throw') {
                 this.cardMutationCommitted = true;
                 throw new Error('card connection lost after commit');
             }
-            return { status: 'saved', card: { ...card }, previousObjectKey: null };
+            return {
+                status: 'saved',
+                card: { ...card },
+                previousObjectKey: null,
+            };
         },
         updateCardMetadataForOwner: async (
             input: UpdateOwnedFudabaCardMetadataInput
@@ -592,8 +633,10 @@ export class OwnerRouteFixture {
             this.metadataInputs.push(input);
             const current = this.cards.get(input.cardId);
             if (
-                !current || current.owner_account_id !== input.ownerAccountId ||
-                current.deleted_at !== null || this.accountStatus !== 'active'
+                !current ||
+                current.owner_account_id !== input.ownerAccountId ||
+                current.deleted_at !== null ||
+                this.accountStatus !== 'active'
             ) {
                 return { status: 'unavailable' };
             }
@@ -694,8 +737,10 @@ export class OwnerRouteFixture {
             this.deleteInputs.push(input);
             const current = this.cards.get(input.cardId);
             if (
-                !current || current.owner_account_id !== input.ownerAccountId ||
-                current.deleted_at !== null || this.accountStatus !== 'active'
+                !current ||
+                current.owner_account_id !== input.ownerAccountId ||
+                current.deleted_at !== null ||
+                this.accountStatus !== 'active'
             ) {
                 return { status: 'unavailable' };
             }
@@ -738,9 +783,12 @@ export class OwnerRouteFixture {
             compensation: this.compensation,
             rateLimiter: this.rateLimiter,
             platformTokens: {
-                async sign() { return PLATFORM_TOKEN; },
+                async sign() {
+                    return PLATFORM_TOKEN;
+                },
                 async verify(token: string) {
-                    if (token !== PLATFORM_TOKEN) throw new Error('wrong token realm');
+                    if (token !== PLATFORM_TOKEN)
+                        throw new Error('wrong token realm');
                     const now = Math.floor(Date.now() / 1000);
                     return {
                         iss: 'imsweb' as const,
@@ -752,12 +800,14 @@ export class OwnerRouteFixture {
                         csrfSecret: CSRF_SECRET,
                         jti: 'platform-access',
                         iat: now,
-                        exp: now + 900
+                        exp: now + 900,
                     };
-                }
+                },
             },
             backofficeTokens: {
-                async sign() { return BACKOFFICE_TOKEN; },
+                async sign() {
+                    return BACKOFFICE_TOKEN;
+                },
                 async verify(token: string) {
                     if (token !== BACKOFFICE_TOKEN) throw new Error('invalid');
                     return {
@@ -768,19 +818,21 @@ export class OwnerRouteFixture {
                         username: 'admin',
                         producername: 'Admin',
                         dept: 'op',
-                        csrfSecret: 'admin-csrf'
+                        csrfSecret: 'admin-csrf',
                     };
-                }
+                },
             },
             config: {
                 fudabaPublicReadEnabled: this.publicReadEnabled,
-                fudabaWriteEnabled: this.writeEnabled
-            }
+                fudabaWriteEnabled: this.writeEnabled,
+            },
         };
     }
 }
 
-export function bearerHeaders(extra: Record<string, string> = {}): Record<string, string> {
+export function bearerHeaders(
+    extra: Record<string, string> = {}
+): Record<string, string> {
     return bearerTokenHeaders(PLATFORM_TOKEN, extra);
 }
 
@@ -788,22 +840,29 @@ export function cookieHeaders(
     csrfHeader: string | null = CSRF_SECRET,
     csrfCookie = CSRF_SECRET
 ): Record<string, string> {
-    return cookieCsrfHeaders([
-        [PLATFORM_ACCESS_TOKEN_COOKIE, PLATFORM_TOKEN],
-        [PLATFORM_CSRF_TOKEN_COOKIE, csrfCookie]
-    ], csrfHeader);
+    return cookieCsrfHeaders(
+        [
+            [PLATFORM_ACCESS_TOKEN_COOKIE, PLATFORM_TOKEN],
+            [PLATFORM_CSRF_TOKEN_COOKIE, csrfCookie],
+        ],
+        csrfHeader
+    );
 }
 
-export function profileBody(expectedUpdatedAt: number): Record<string, unknown> {
+export function profileBody(
+    expectedUpdatedAt: number
+): Record<string, unknown> {
     return {
         displayName: 'Updated Owner',
         homeCity: 'Beijing',
         bio: 'Updated profile bio',
-        expectedUpdatedAt
+        expectedUpdatedAt,
     };
 }
 
-export function metadataBody(expectedRevision: number): Record<string, unknown> {
+export function metadataBody(
+    expectedRevision: number
+): Record<string, unknown> {
     return {
         producerName: 'Updated Producer',
         seriesCodes: ['765'],
@@ -826,6 +885,6 @@ export async function postCard(fixture: OwnerRouteFixture): Promise<Response> {
     return fixture.app.request('http://ims.test/api/community/exchange/cards', {
         method: 'POST',
         headers: bearerHeaders(),
-        body: new FormData()
+        body: new FormData(),
     });
 }

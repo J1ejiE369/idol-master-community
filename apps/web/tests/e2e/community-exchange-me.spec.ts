@@ -7,6 +7,7 @@ import type { PlatformProfile } from "@imsweb/contracts/platform"
 import { api, expect, test } from "./fixtures/test"
 import { makeCharacterCatalog } from "./fixtures/fudaba-characters"
 import { settleToasts } from "./fixtures/toast"
+import { installOfficePageDefaults } from "./fixtures/office-page-defaults"
 
 const avatarFixture = Buffer.from(
   `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240">
@@ -42,8 +43,8 @@ const card = {
   tradeNote: "周末现场交换",
   exchangeMode: "manual",
   madeOn: null,
-  groupName: null,
-  isGroupCard: false,
+  groupName: null,
+  isGroupCard: false,
   producerReading: null,
   isOriginal: false,
   madeWithAi: false,
@@ -499,6 +500,7 @@ test.describe("account personal workspace", () => {
     api: dispatcher,
   }, testInfo) => {
     await page.emulateMedia({ reducedMotion: "reduce" })
+    installOfficePageDefaults(dispatcher, office.id, office)
     const consoleErrors: string[] = []
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text())

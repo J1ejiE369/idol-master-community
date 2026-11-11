@@ -1047,7 +1047,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
             position_x: 12.5,
             position_y: 87.25,
             rotation: -4.5,
-            z_index: 8,
+            z_index: 1,
             revision: 0,
             updated_at: CREATED_AT
         });
@@ -1105,7 +1105,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
             position_x: 100,
             position_y: 0,
             rotation: 12,
-            z_index: 999,
+            z_index: 2,
             revision: 1,
             updated_at: UPDATED_AT
         });
@@ -1451,6 +1451,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
     function placementBody(expectedRevision: number | null): Record<string, unknown> {
         return {
+            layoutVersion: 1,
             x: 25.5,
             y: 74.5,
             rotation: -3,
@@ -1461,10 +1462,22 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
     function path(cardId = CARD_ID): string {
         return `/api/community/exchange/offices/${OFFICE_ID}` +
-            `/cards/${cardId}/placement`;
+            `/cards/${cardId}/world-placement`;
     }
 
     test.describe('card placement', () => {
+        test('legacy percentage writes fail with a layout conflict without changing a placement', async () => {
+            const fixture = new PlacementRouteFixture();
+            const response = await fixture.app.request('http://ims.test' + path().replace('/world-placement', '/placement'), {
+                method: 'PUT',
+                headers: bearerHeaders({ 'content-type': 'application/json' }),
+                body: JSON.stringify({ x: 50, y: 50, rotation: 0, zIndex: 1, expectedRevision: null })
+            });
+            assert.equal(response.status, 409);
+            assert.equal((await response.json() as { code: string }).code, 'FUDABA_WALL_LAYOUT_CONFLICT');
+            assert.equal(fixture.placements.size, 0);
+        });
+
         test('routes enforce write gate, Platform auth, active status, CSRF, and rate limit',
             async () => {
                 const disabled = new PlacementRouteFixture({ writeEnabled: false });
@@ -1498,7 +1511,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
                 const limited = new PlacementRouteFixture();
                 limited.rateLimiter.deniedBuckets.add('platform-write-account');
-                assert.equal((await limited.app.request(`http://ims.test${path()}`, {
+                assert.equal((await limited.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 0 })
@@ -1547,8 +1560,8 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                 assert.equal((await duplicate.json() as { revision: number }).revision, 0);
 
                 for (const invalid of [
-                    { ...placementBody(0), x: -0.01 },
-                    { ...placementBody(0), y: 100.01 },
+                    { ...placementBody(0), x: -1_000_000.01 },
+                    { ...placementBody(0), y: 1_000_000.01 },
                     { ...placementBody(0), rotation: 12.01 },
                     { ...placementBody(0), zIndex: 1.5 },
                     { ...placementBody(0), expectedRevision: '0' },
@@ -1574,6 +1587,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                     method: 'PUT',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({
+                        layoutVersion: 1,
                         x: 0,
                         y: 100,
                         rotation: 12,
@@ -1661,7 +1675,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                 assert.equal(closedUpdate.status, 404);
                 assert.deepEqual(await closedUpdate.json(), notFound);
 
-                const removed = await fixture.app.request(`http://ims.test${path()}`, {
+                const removed = await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 0 })
@@ -1682,20 +1696,20 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                     body: JSON.stringify(placementBody(null))
                 })).status, 201);
 
-                const stale = await fixture.app.request(`http://ims.test${path()}`, {
+                const stale = await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 2 })
                 });
                 assert.equal(stale.status, 409);
                 assert.equal((await stale.json() as { revision: number }).revision, 0);
-                assert.equal((await fixture.app.request(`http://ims.test${path()}`, {
+                assert.equal((await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: '0' })
                 })).status, 400);
 
-                const removed = await fixture.app.request(`http://ims.test${path()}`, {
+                const removed = await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: {
                         ...cookieHeaders(true),
@@ -1708,7 +1722,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                     success: true,
                     revision: 1
                 });
-                assert.equal((await fixture.app.request(`http://ims.test${path()}`, {
+                assert.equal((await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 1 })
@@ -4519,8 +4533,12 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                 '20261105200000_catalog_public_facts',
                 '20261106120000_namecard_exchange_system',
                 '20261107120000_namecard_media_key_normalization',
-                '20261107160000_namecard_group_card',
+                '20261107160000_namecard_group_card',
                 '20261107180000_fudaba_card_pages',
+                '20261108120000_fudaba_wall_world',
+                '20261108120100_fudaba_message_wall_v2',
+                '20261108120200_fudaba_wall_scene',
+                '20261108120300_fudaba_preview_invalidation',
             ]);
             const currentOffice = await fixture.repository.findOfficeById(original.id);
             assert.equal(currentOffice?.review_state, 'pending');
@@ -11310,7 +11328,6 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
 // fudaba-public-routes.test.ts
 {
-    const NOW = Date.now();
     const CREATED_AT = "2026-08-02T00:00:00.000Z";
 
     class PublicMediaStorage implements ObjectStorage {
@@ -11531,6 +11548,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
         } = {},
     ): RuntimeServices {
         const status = options.accountStatus ?? "active";
+        const now = Date.now();
         return {
             fudaba: fudaba.repository,
             namecardCharacters: fudaba.characters,
@@ -11552,8 +11570,8 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                         sessionId: "platform-session",
                         csrfSecret: "csrf-secret",
                         jti: "access-token",
-                        iat: Math.floor(Date.now() / 1000),
-                        exp: Math.floor(Date.now() / 1000) + 300,
+                        iat: Math.floor(now / 1000),
+                        exp: Math.floor(now / 1000) + 300,
                     };
                 },
             },
@@ -11565,9 +11583,9 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                         token_hash: "hash",
                         previous_token_hash: null,
                         csrf_hash: "csrf-hash",
-                        expires_at: Date.now() + 60_000,
-                        created_at: NOW,
-                        updated_at: NOW,
+                        expires_at: now + 60_000,
+                        created_at: now,
+                        updated_at: now,
                         revoked_at: null,
                     };
                 },
@@ -11577,9 +11595,9 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                             id: "platform-viewer",
                             status,
                             token_version: 0,
-                            created_at: NOW,
-                            updated_at: NOW,
-                            deleted_at: status === "deleted" ? NOW : null,
+                            created_at: now,
+                            updated_at: now,
+                            deleted_at: status === "deleted" ? now : null,
                         },
                         profile: {
                             account_id: "platform-viewer",
@@ -11588,7 +11606,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                             avatar_external_url: null,
                             home_city: null,
                             bio: "",
-                            updated_at: NOW,
+                            updated_at: now,
                         },
                     };
                 },

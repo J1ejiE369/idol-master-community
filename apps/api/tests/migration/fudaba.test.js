@@ -16,7 +16,13 @@ import path from 'node:path';
 import { Pool } from 'pg';
 import sharp from 'sharp';
 import sqlite3Module from 'sqlite3';
-import { afterAll, onTestFinished, test } from 'vitest';
+import { afterAll, onTestFinished, test, vi } from 'vitest';
+
+// These suites run without PostgreSQL (IMS_TEST_POSTGRES_ENABLED=false), where
+// the API config drops the per-test budget to 5s. Their fixtures write and hash
+// real files, and on a slow external data disk that exceeds 5s even though each
+// assertion is fast. Use the same 30s budget as the PostgreSQL-enabled run.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 // fudaba-media.test.js
 {

@@ -1,3 +1,4 @@
+import { MessagesPanel } from "~/pages/community/exchange/messages-panel"
 import {
   CheckIcon,
   ContactRoundIcon,
@@ -57,7 +58,7 @@ import {
 } from "./reason-presets"
 
 export function meta() {
-  return [{ title: "名片审核 | IMSWeb" }]
+  return [{ title: "名片与留言管理 | IMSWeb" }]
 }
 
 interface NamecardListFilters {
@@ -417,6 +418,7 @@ export default function AdminCardsPage() {
       <Tabs defaultValue="guest">
         <TabsList aria-label="名片审核类型">
           <TabsTrigger value="guest">投稿审核</TabsTrigger>
+          <TabsTrigger value="messages">留言管理</TabsTrigger>
           <TabsTrigger value="claims">旧名片认领</TabsTrigger>
         </TabsList>
 
@@ -652,6 +654,9 @@ export default function AdminCardsPage() {
           />
         </TabsContent>
 
+        <TabsContent value="messages" className="pt-5">
+          <MessagesPanel mode="admin" />
+        </TabsContent>
         <TabsContent value="claims" className="flex flex-col gap-7 pt-5">
           <ClaimReviewTab reloadToken={reloadToken} />
         </TabsContent>

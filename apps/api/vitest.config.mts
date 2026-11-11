@@ -65,9 +65,9 @@ export default defineConfig({
             // cannot parse them, so leaving them in prints a parse-error stack
             // on every coverage run. They carry no statements either way.
             // Ops entry points are executed by the deployment image and CLI,
-
+
             // not by the HTTP app; their tests live with the scripts lane.
-
+
             exclude: ['**/*.d.ts', '**/*.md', 'src/operations/**'],
             // Re-floored after the page-layout and exchange consolidation: the
             // 2026-09-19 gate (statements 76, branches 66, functions 84, lines

@@ -156,6 +156,10 @@ export const resources = {
               label: "消息",
               description: "审核通知与名片认领",
             },
+            messages: {
+              label: "我的留言",
+              description: "管理自己发布的便签留言",
+            },
           },
         },
         profileEditor: {
@@ -740,6 +744,10 @@ export const resources = {
             claims: {
               label: "Messages",
               description: "Review notices and card claims",
+            },
+            messages: {
+              label: "My messages",
+              description: "Manage your wall messages",
             },
           },
         },

@@ -165,7 +165,11 @@ test.describe('PostgreSQL migration', () => {
                 { version: '20261106120000_namecard_exchange_system', phase: 'pre-data' },
                 { version: '20261107120000_namecard_media_key_normalization', phase: 'post-data' },
                 { version: '20261107160000_namecard_group_card', phase: 'post-data' },
-                { version: '20261107180000_fudaba_card_pages', phase: 'post-data' }
+                { version: '20261107180000_fudaba_card_pages', phase: 'post-data' },
+                { version: '20261108120000_fudaba_wall_world', phase: 'post-data' },
+                { version: '20261108120100_fudaba_message_wall_v2', phase: 'post-data' },
+                { version: '20261108120200_fudaba_wall_scene', phase: 'post-data' },
+                { version: '20261108120300_fudaba_preview_invalidation', phase: 'post-data' }
             ]
         );
         for (const migration of migrations) assert.match(migration.checksum, /^[a-f0-9]{64}$/);
@@ -694,11 +698,11 @@ test.describe('PostgreSQL migration', () => {
 
     test('catalog is available without a database connection', () => {
         const catalog = migrationCatalog();
-        assert.equal(catalog.count, 98);
+        assert.equal(catalog.count, 102);
         assert.equal(catalog.migrations[0].version, '0001_initial_compatibility');
         assert.equal(
             catalog.migrations.at(-1).version,
-            '20261107180000_fudaba_card_pages'
+            '20261108120300_fudaba_preview_invalidation'
         );
         assert.match(catalog.migrations[0].checksum, /^[a-f0-9]{64}$/);
     });
@@ -1076,7 +1080,11 @@ test.describe('PostgreSQL migration', () => {
         '20261106120000_namecard_exchange_system',
         '20261107120000_namecard_media_key_normalization',
         '20261107160000_namecard_group_card',
-        '20261107180000_fudaba_card_pages'
+        '20261107180000_fudaba_card_pages',
+        '20261108120000_fudaba_wall_world',
+        '20261108120100_fudaba_message_wall_v2',
+        '20261108120200_fudaba_wall_scene',
+        '20261108120300_fudaba_preview_invalidation'
             ]);
             const second = await applyMigrations(client, { migrations });
             assert.deepEqual(second.executed, []);

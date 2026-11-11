@@ -1,3 +1,4 @@
+import { saveFudabaTinyPreview } from '@/domains/community/fudaba/card-preview';
 import type { Context } from 'hono';
 import type { AppEnvironment } from '@/app';
 import { fudabaOwnerCardView } from '@/domains/community/fudaba/contracts/card';
@@ -177,6 +178,32 @@ export async function handleCreateFudabaCard(
         }
         const now = new Date().toISOString();
         const repository = fudabaRepository(c);
+        const storePreviews = async (revision: number) => {
+            try {
+                await Promise.all([
+                    saveFudabaTinyPreview(
+                        repository.messages,
+                        runtime.images!,
+                        frontKey,
+                        frontImage.body,
+                        { cardId, revision, side: 'front' }
+                    ),
+                    ...(backKey && backImage
+                        ? [saveFudabaTinyPreview(
+                            repository.messages,
+                            runtime.images!,
+                            backKey,
+                            backImage.body,
+                            { cardId, revision, side: 'back' }
+                        )]
+                        : []),
+                ]);
+            } catch {
+                console.warn(
+                    '[fudaba] low-resolution preview storage failed; using the skeleton fallback'
+                );
+            }
+        };
         cleanupCreatedObjects = false;
         let result: FudabaCardMutationResult;
         try {
@@ -206,6 +233,7 @@ export async function handleCreateFudabaCard(
                 recovered?.front_object_key === frontKey &&
                 recovered.back_object_key === backKey
             ) {
+                await storePreviews(recovered.revision);
                 return c.json({
                     success: true,
                     card: fudabaOwnerCardView(recovered)
@@ -221,6 +249,7 @@ export async function handleCreateFudabaCard(
             return c.json({ success: false, code: 'FUDABA_CARD_UNAVAILABLE' }, 409);
         }
         cleanupCreatedObjects = false;
+        await storePreviews(result.card.revision);
         return c.json({ success: true, card: fudabaOwnerCardView(result.card) }, 201);
     } catch (error) {
         if (cleanupCreatedObjects) {

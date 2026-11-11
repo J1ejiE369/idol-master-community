@@ -132,13 +132,13 @@ test("opens personal content with desktop sidebar and mobile standalone navigati
         .locator("section[aria-labelledby='account-business-title']")
         .getByRole("link")
     : page.getByRole("navigation", { name: "个人档案菜单" }).getByRole("link")
-  await expect(links).toHaveCount(5)
+  await expect(links).toHaveCount(6)
   if (!isMobile) {
     await expect(
       page
         .getByRole("navigation", { name: "个人档案菜单" })
         .getByRole("listitem")
-    ).toHaveCount(5)
+    ).toHaveCount(6)
   }
   if (!isMobile) {
     await expect(
@@ -223,9 +223,9 @@ test("opens personal content with desktop sidebar and mobile standalone navigati
     await expect(page).toHaveTitle(`${label} | IMSWeb`)
     await expect(page.getByRole("main")).toHaveCount(1)
     if (section === "namecards") {
-      await expect(page.getByRole("textbox", { name: "制作人名称" })).toHaveCount(
-        0
-      )
+      await expect(
+        page.getByRole("textbox", { name: "制作人名称" })
+      ).toHaveCount(0)
       await page
         .getByRole("button", { name: "新建名片", exact: true })
         .first()
@@ -506,7 +506,12 @@ for (const section of ["offices", "namecards"] as const) {
           json: {
             ...session,
             capabilities: { fudabaWrite: true },
-            profile: { ...session.profile, updatedAt: 1, uid: 1, pageSlug: null },
+            profile: {
+              ...session.profile,
+              updatedAt: 1,
+              uid: 1,
+              pageSlug: null,
+            },
           },
         })
     )
@@ -518,7 +523,7 @@ for (const section of ["offices", "namecards"] as const) {
       "/api/community/exchange/me/series",
       "/api/community/exchange/me/cards",
       "/api/community/exchange/me/offices",
-        "/api/community/exchange/me/favorites",
+      "/api/community/exchange/me/favorites",
     ]
     for (const path of ownerPaths)
       await api.mock({ method: "GET", path, times: 1 }, (route) =>

@@ -105,6 +105,10 @@ test.skipIf(!postgresIntegrationEnabled())(
                 '20261107120000_namecard_media_key_normalization',
                 '20261107160000_namecard_group_card',
                 '20261107180000_fudaba_card_pages',
+                '20261108120000_fudaba_wall_world',
+                '20261108120100_fudaba_message_wall_v2',
+                '20261108120200_fudaba_wall_scene',
+                '20261108120300_fudaba_preview_invalidation',
 
             ]);
             const seeded = (

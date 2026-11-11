@@ -205,6 +205,7 @@ test("无名片作者发布重试、编辑、移动和永久销毁 @mobile", asy
   ])
   const account = { id: "note-author", status: "active" }
   const profile = {
+    uid: 1,
     displayName: "作者",
     avatarUrl: null,
     homeCity: "上海",
@@ -448,7 +449,7 @@ test("无名片作者发布重试、编辑、移动和永久销毁 @mobile", asy
   await expect(paper).toHaveAttribute("aria-pressed", "true")
   // Reload to read the public wall item, which must fetch author capabilities.
   await page.reload()
-  await paper.scrollIntoViewIfNeeded()
+  await expect(paper).toHaveAttribute("aria-pressed", "false")
   await paper.click()
   await expect(paper).toHaveAttribute("aria-pressed", "true")
   const reader = page.getByRole("dialog", { name: "留言全文" })

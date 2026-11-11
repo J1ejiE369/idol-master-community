@@ -595,6 +595,7 @@ describe("CommunityOfficePage", () => {
     )
     const handle = await screen.findByRole("button", { name: "移动留言" })
     const refresh = screen.getByRole("button", { name: "刷新墙面" })
+    await waitFor(() => expect(sendScene).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(refresh).toBeEnabled())
 
     let releaseOldScene: (value: typeof scene) => void = () => {

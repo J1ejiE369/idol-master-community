@@ -75,6 +75,7 @@ test("全墙1000占位、远处逐物件加载、定位选择与动态便签 @mo
   ])
   const account = { id: "scene-author", status: "active" }
   const profile = {
+    uid: 1,
     displayName: "加载测试制作人",
     avatarUrl: null,
     homeCity: "上海",

@@ -309,9 +309,19 @@ test("loads the complete wall observation area and replaces distant content with
       page.getByRole("button", { name: "平移墙面", exact: true })
     ).toHaveAttribute("aria-pressed", "false")
     await viewport.scrollIntoViewIfNeeded()
-    const scrollBox = (await viewport.boundingBox())!
-    const scrollY = await page.evaluate(() => window.scrollY)
+    const scrollY = await viewport.evaluate((element) => {
+      const scrollOwner =
+        element.closest<HTMLElement>(".exchange-map-page-dialog-body") ??
+        document.scrollingElement
+      if (!scrollOwner) throw new Error("Wall scroll container is unavailable")
+      scrollOwner.scrollTop = Math.min(
+        scrollOwner.scrollHeight - scrollOwner.clientHeight,
+        Math.max(scrollOwner.scrollTop, 120)
+      )
+      return scrollOwner.scrollTop
+    })
     expect(scrollY).toBeGreaterThan(0)
+    const scrollBox = (await viewport.boundingBox())!
     const scrollStart = {
       x: scrollBox.x + 20,
       y: scrollBox.y + scrollBox.height / 2,
@@ -330,7 +340,14 @@ test("loads the complete wall observation area and replaces distant content with
       touchPoints: [],
     })
     await expect
-      .poll(() => page.evaluate(() => window.scrollY))
+      .poll(() =>
+        viewport.evaluate((element) => {
+          const scrollOwner =
+            element.closest<HTMLElement>(".exchange-map-page-dialog-body") ??
+            document.scrollingElement
+          return scrollOwner?.scrollTop ?? 0
+        })
+      )
       .toBeLessThan(scrollY)
     await touch.detach()
   }

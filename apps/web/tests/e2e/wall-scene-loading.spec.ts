@@ -171,7 +171,7 @@ test("全墙1000占位、远处逐物件加载、定位选择与动态便签 @mo
         createdAt: timestamp,
         updatedAt: timestamp,
         placement: placement(
-          index === 0 ? 950 : index === 1 ? 20320 : 70000 + (index % 20) * 280,
+          index === 0 ? 950 : index === 1 ? 20250 : 70000 + (index % 20) * 280,
           index < 2 ? 450 : 20000 + Math.floor(index / 20) * 600,
           index + 10
         ),

@@ -560,23 +560,32 @@ test.describe("community exchange", () => {
         "aria-selected",
         "true"
       )
-      const wallBox = await wall.boundingBox()
-      expect(wallBox).not.toBeNull()
       const wallCard = wall.getByRole("button", {
         name: `查看${name}的名片正面`,
         exact: true,
       })
       await expect(wallCard).toHaveCount(1)
-      const cardBox = await wallCard.boundingBox()
-      expect(cardBox).not.toBeNull()
-      expect(cardBox!.x).toBeGreaterThanOrEqual(wallBox!.x)
-      expect(cardBox!.y).toBeGreaterThanOrEqual(wallBox!.y)
-      expect(cardBox!.x + cardBox!.width).toBeLessThanOrEqual(
-        wallBox!.x + wallBox!.width
-      )
-      expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(
-        wallBox!.y + wallBox!.height
-      )
+      await wall.scrollIntoViewIfNeeded()
+      await expect(async () => {
+        const { wallBox, cardBox } = await wallCard.evaluate((card) => {
+          const region = card.closest(
+            '[role="region"][aria-label="名片墙放置区域"]'
+          )
+          if (!region) throw new Error("名片墙放置区域不存在")
+          return {
+            wallBox: region.getBoundingClientRect().toJSON(),
+            cardBox: card.getBoundingClientRect().toJSON(),
+          }
+        })
+        expect(cardBox.x).toBeGreaterThanOrEqual(wallBox.x)
+        expect(cardBox.y).toBeGreaterThanOrEqual(wallBox.y)
+        expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(
+          wallBox.x + wallBox.width
+        )
+        expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(
+          wallBox.y + wallBox.height
+        )
+      }).toPass()
     }
   })
   test("lets a card owner arrange and persist the free-placement wall @mobile", async ({

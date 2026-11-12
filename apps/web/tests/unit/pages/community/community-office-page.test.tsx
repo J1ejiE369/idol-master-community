@@ -731,7 +731,12 @@ describe("CommunityOfficePage", () => {
     const user = userEvent.setup()
     mockAuthenticatedPlatformSession()
     apiMocks.deleteFudabaCardPlacement.mockReturnValue({
-      send: vi.fn().mockResolvedValue({ success: true }),
+      send: vi.fn().mockImplementation(async () => {
+        apiMocks.sendOffice.mockResolvedValue(
+          makeFudabaOfficeDetail({ cards: [] })
+        )
+        return { success: true }
+      }),
     })
     const { container } = renderPage()
     const editButton = await screen.findByRole("button", { name: "布置名片墙" })
@@ -739,7 +744,6 @@ describe("CommunityOfficePage", () => {
       name: "定位我的名片",
     })
     await waitFor(() => expect(locateButton).toBeEnabled())
-    apiMocks.sendOffice.mockResolvedValue(makeFudabaOfficeDetail({ cards: [] }))
 
     await user.click(editButton)
     await user.click(screen.getByRole("button", { name: "从名片墙移除" }))
@@ -791,6 +795,8 @@ describe("CommunityOfficePage", () => {
     const editButton = await screen.findByRole("button", {
       name: "布置名片墙",
     })
+    await waitFor(() => expect(apiMocks.sendOffice).toHaveBeenCalledTimes(2))
+    const officeReadsBeforePlacement = apiMocks.sendOffice.mock.calls.length
     apiMocks.sendOffice.mockRejectedValueOnce(
       new ApiError("Service Unavailable", {
         kind: "http",
@@ -804,7 +810,9 @@ describe("CommunityOfficePage", () => {
     await user.click(addButton)
 
     await waitFor(() => {
-      expect(apiMocks.sendOffice).toHaveBeenCalledTimes(2)
+      expect(apiMocks.sendOffice).toHaveBeenCalledTimes(
+        officeReadsBeforePlacement + 1
+      )
       expect(addButton).toBeDisabled()
     })
     expect(apiMocks.saveFudabaCardPlacement).toHaveBeenCalledOnce()
@@ -840,6 +848,8 @@ describe("CommunityOfficePage", () => {
     const editButton = await screen.findByRole("button", {
       name: "布置名片墙",
     })
+    await waitFor(() => expect(apiMocks.sendOffice).toHaveBeenCalledTimes(2))
+    const officeReadsBeforeConflict = apiMocks.sendOffice.mock.calls.length
     apiMocks.sendPlacement.mockRejectedValueOnce(
       new ApiError("Placement conflict", {
         kind: "http",
@@ -864,7 +874,9 @@ describe("CommunityOfficePage", () => {
     await user.keyboard("{ArrowRight}")
 
     await waitFor(() => {
-      expect(apiMocks.sendOffice).toHaveBeenCalledTimes(2)
+      expect(apiMocks.sendOffice).toHaveBeenCalledTimes(
+        officeReadsBeforeConflict + 1
+      )
       expect(toastMocks.error).toHaveBeenCalledWith(
         "名片墙已在其他页面更新，但最新布局暂时无法载入，请重新加载页面。"
       )

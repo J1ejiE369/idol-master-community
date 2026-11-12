@@ -3,6 +3,10 @@ import { api, expect, test } from "./fixtures/test"
 
 import { installBrowserIconMock } from "./fixtures/homepage"
 import { installOfficePageDefaults } from "./fixtures/office-page-defaults"
+import {
+  installPlatformSessionMock,
+  platformProfileWithHandle,
+} from "./fixtures/platform-auth"
 
 const series = {
   items: [
@@ -1215,8 +1219,66 @@ test.describe("map first-use guide", () => {
 test("offers office creation at a right-clicked position and keyboard-selected map center @mobile", async ({
   page,
   api,
+  baseURL,
 }, testInfo) => {
   await page.emulateMedia({ reducedMotion: "reduce" })
+  await page.addInitScript(() => {
+    localStorage.setItem("ims.platform.access-token", "map-create-token")
+  })
+  await page.context().addCookies([
+    { name: "ims_platform_access", value: "map-create-token", url: baseURL! },
+    { name: "ims_platform_csrf", value: "map-create-csrf", url: baseURL! },
+  ])
+  const session = {
+    success: true as const,
+    account: { id: "map-create-owner", status: "active" as const },
+    profile: {
+      uid: 1,
+      displayName: "地图制作人",
+      avatarUrl: null,
+      homeCity: null,
+      bio: "",
+    },
+  }
+  await installPlatformSessionMock(api, session, {
+    times: { min: 1, max: 4 },
+  })
+  await api.mock(
+    {
+      method: "GET",
+      path: "/api/platform/me",
+      times: { min: 1, max: 4 },
+    },
+    (route) =>
+      route.fulfill({
+        json: {
+          ...session,
+          profile: platformProfileWithHandle(session.profile),
+          capabilities: { fudabaWrite: true },
+        },
+      })
+  )
+  for (const path of [
+    "/api/community/exchange/me/series",
+    "/api/community/exchange/me/cards",
+    "/api/community/exchange/me/offices",
+  ]) {
+    await api.mock(
+      { method: "GET", path, times: { min: 0, max: 4 } },
+      (route) => route.fulfill({ json: { items: [] } })
+    )
+  }
+  await api.mock(
+    {
+      method: "GET",
+      path: "/api/community/exchange/me/favorites",
+      times: { min: 0, max: 4 },
+    },
+    (route) =>
+      route.fulfill({
+        json: { items: [], pageInfo: { hasNextPage: false, nextCursor: null } },
+      })
+  )
   await api.mockRoute(
     "/api/community/exchange/map/config",
     (route) =>

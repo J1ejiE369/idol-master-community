@@ -1222,6 +1222,19 @@ test("offers office creation at a right-clicked position and keyboard-selected m
   baseURL,
 }, testInfo) => {
   await page.emulateMedia({ reducedMotion: "reduce" })
+  let writtenCreateIntent: string | null = null
+  await page.exposeBinding("__recordOfficeCreateIntent", (_, value: string) => {
+    writtenCreateIntent = value
+  })
+  await page.addInitScript(() => {
+    const setItem = Storage.prototype.setItem
+    Storage.prototype.setItem = function (key, value) {
+      setItem.call(this, key, value)
+      if (this === sessionStorage && key === "ims:office-create-intent") {
+        void Reflect.get(window, "__recordOfficeCreateIntent")(value)
+      }
+    }
+  })
   await page.addInitScript(() => {
     localStorage.setItem("ims.platform.access-token", "map-create-token")
   })
@@ -1323,11 +1336,6 @@ test("offers office creation at a right-clicked position and keyboard-selected m
   ).toBeVisible()
   await page.getByRole("button", { name: "在此创建事务所" }).click()
   await expect(page).toHaveURL(/\/account\/me\/offices\?create=[\w-]+$/)
-  expect(
-    await page.evaluate(
-      () =>
-        JSON.parse(sessionStorage.getItem("ims:office-create-intent") ?? "null")
-          ?.target.kind
-    )
-  ).toBe("wgs84")
+  await expect.poll(() => writtenCreateIntent).not.toBeNull()
+  expect(JSON.parse(writtenCreateIntent ?? "null")?.target.kind).toBe("wgs84")
 })

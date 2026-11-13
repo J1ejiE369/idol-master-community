@@ -148,7 +148,15 @@ async function applyMigrations(client, options = {}) {
         if (existing) {
             continue;
         }
-        await client.query(migration.sql);
+        // Deployments already on page-row media have dropped the columns
+        // required by this historical trigger. Record its canonical checksum
+        // without creating the obsolete triggers on that upgrade path.
+        const legacyPreviewTriggersAlreadyRetired =
+            migration.version === '20261108120300_fudaba_preview_invalidation' &&
+            applied.has('20261112140000_namecard_retire_card_key_columns');
+        if (!legacyPreviewTriggersAlreadyRetired) {
+            await client.query(migration.sql);
+        }
         await client.query(
             `INSERT INTO public.ims_schema_migrations
              (version, filename, phase, checksum) VALUES ($1, $2, $3, $4)`,

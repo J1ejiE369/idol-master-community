@@ -62,15 +62,18 @@ async function seed(
     await database
         .prepare(
             `INSERT INTO fudaba_cards
-        (id,owner_account_id,producer_name,${legacySchema ? 'display_name,series_code,' : ''}
-        front_object_key,back_object_key,${legacySchema ? 'media_rights_status,' : ''}publication_status,created_at,updated_at)
-        SELECT 'wall-card-' || lpad(n::text,4,'0'), 'wall-owner','Producer',${legacySchema ? "'Card ' || n,'765'," : ''}
-        'community/fudaba/' || n || '/front.webp','community/fudaba/' || n || '/back.webp',
-        ${legacySchema ? "'approved'," : ''}'published',?::timestamptz,?::timestamptz FROM generate_series(1,?) n`,
+        (id,owner_account_id,producer_name,
+        ${legacySchema ? 'front_object_key,back_object_key,' : ''}publication_status,created_at,updated_at)
+        SELECT 'wall-card-' || lpad(n::text,4,'0'), 'wall-owner','Producer',
+        ${legacySchema ? "'community/fudaba/' || n || '/front.webp','community/fudaba/' || n || '/back.webp'," : ''}
+        'published',?::timestamptz,?::timestamptz FROM generate_series(1,?) n`,
         )
         .bind(time, time, count)
         .run();
     if (!legacySchema) {
+        await database.prepare(
+            "INSERT INTO fudaba_card_pages(card_id,queue,page_id,display_order,object_version,width,height,created_at,updated_at) SELECT id,'live','front',1,'11111111-1111-4111-8111-111111111111',240,160,created_at,updated_at FROM fudaba_cards WHERE id LIKE 'wall-card-%'"
+        ).run();
         await database.prepare(
             "INSERT INTO fudaba_card_series(card_id,series_code,display_order) SELECT id,'765',1 FROM fudaba_cards WHERE id LIKE 'wall-card-%'"
         ).run();
@@ -287,7 +290,7 @@ test('legacy migration preserves identities and layout when rerun', async () => 
     const harness = await createPostgresTestHarness({ migrationsPath });
     onTestFinished(() => harness.close());
     const database = harness.connection;
-    await seed(database, 2, false);
+    await seed(database, 2, true);
     await database
         .prepare(
             `INSERT INTO fudaba_office_cards

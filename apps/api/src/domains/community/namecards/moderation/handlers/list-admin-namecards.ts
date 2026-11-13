@@ -33,7 +33,7 @@ export async function handleListAdminNamecards(
             data: rows.map((row) => {
                 const rowsForCard = pagesByNumber.get(Number(row.id));
                 const pending =
-                    row.reviewStatus === 'pending' &&
+                    row.reviewStatus !== null &&
                     (rowsForCard?.pending.length ?? 0) > 0;
                 const pages = cardArtworkView({
                     scope: 'admin',
@@ -42,9 +42,10 @@ export async function handleListAdminNamecards(
                     live: rowsForCard?.live ?? [],
                     pending: pending ? (rowsForCard?.pending ?? []) : []
                 });
+                const pageViews = pending ? (pages.pending ?? []) : pages.live;
                 return toAdminNamecardResponse(
                     row,
-                    pending ? (pages.pending ?? []) : pages.live
+                    pageViews.length > 0 ? pageViews : undefined
                 );
             }),
             pageInfo: {

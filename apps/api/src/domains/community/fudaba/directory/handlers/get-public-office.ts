@@ -29,7 +29,8 @@ export async function handleGetFudabaPublicOffice(
         Promise.all(office.cards.map((card) => {
             const rows = pagesByCard.get(card.id);
             const pages = cardArtworkView({
-                scope: 'public', cardNumber: 0, cardId: card.id,
+                scope: 'public', publicRoute: 'exchange',
+                cardNumber: 0, cardId: card.id,
                 live: rows?.live ?? [], pending: []
             }).live;
             return fudabaPublicPlacedCardView(storage, card, pages);

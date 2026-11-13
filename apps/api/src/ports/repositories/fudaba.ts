@@ -202,6 +202,7 @@ export interface FudabaCardPageRecord {
     page_id: string;
     display_order: number;
     object_version: string;
+    object_queue?: 'live' | 'pending';
     width: number;
     height: number;
 }
@@ -217,11 +218,12 @@ export interface FudabaCardRecord {
     favorite_characters: CardFavoriteSelectionRecord[];
     legacy_card_id: number | null;
     origin: FudabaCardOrigin;
-    front_object_key: string;
+    /** 统一布局的线上页面行，按 display_order 排好。 */
+    pages: FudabaCardPageRecord[];
+    /** 完整待审页面快照；没有待审版本时为空数组。 */
+    pending_pages: FudabaCardPageRecord[];
     /** Ordered middle pages; empty for a two-sided card. */
     middle_object_keys: string[];
-    /** Null for a single-sided card. */
-    back_object_key: string | null;
     /** Derived from the artwork; never submitted by the owner. */
     accent: string;
     bio: string;
@@ -241,9 +243,6 @@ export interface FudabaCardRecord {
     review_reason: string | null;
     review_submitted_at: string | null;
     pending_payload: FudabaPendingCardPayload | null;
-    pending_front_object_key: string | null;
-    pending_middle_object_keys: string[];
-    pending_back_object_key: string | null;
     revision: number;
     created_at: string;
     updated_at: string;
@@ -259,9 +258,8 @@ export interface NewFudabaCardInput {
     seriesCodes: string[];
     favoriteCharacterIds?: number[];
     legacyCardId?: number | null;
-    frontObjectKey: string;
-    /** Absent for a single-sided card. */
-    backObjectKey?: string | null;
+    /** 统一布局的线上页面行，按 display_order 排好。 */
+    pages?: FudabaCardPageWrite[];
     bio: string;
     tradeNote: string;
     exchangeMode: FudabaExchangeMode;
@@ -283,6 +281,7 @@ export interface NewFudabaCardInput {
 export interface FudabaCardPageWrite {
     pageId: string;
     objectVersion: string;
+    objectQueue?: 'live' | 'pending';
     width: number;
     height: number;
 }
@@ -295,12 +294,8 @@ export interface CreateOwnedFudabaCardInput {
     producerName: string;
     seriesCodes: string[];
     favoriteCharacterIds?: number[];
-    frontObjectKey: string;
     /** Dominant colour sampled from the front artwork, when one was found. */
     accent?: string | null;
-    middleObjectKeys?: string[];
-    /** Absent for a single-sided card. */
-    backObjectKey?: string | null;
     bio: string;
     tradeNote: string;
     exchangeMode: FudabaExchangeMode;
@@ -418,8 +413,9 @@ export interface FudabaRegisteredCardReviewRecord extends FudabaCardRecord {
 
 export interface FudabaAdminCardClaimRecord extends FudabaCardClaimRecord {
     claimant_display_name: string;
-    legacy_image1_url: string;
-    legacy_image2_url: string | null;
+    /** 老卡正面/背面的对象 key，认领审核通过时作为复制来源。 */
+    legacy_front_key: string;
+    legacy_back_key: string | null;
     /** The owner card this claim binds to; null when it creates a new card. */
     target_card_number: number | null;
 }
@@ -559,7 +555,12 @@ export type FudabaRegisteredCardReviewClaim =
     | { status: "unavailable" };
 
 export type FudabaRegisteredCardReviewResult =
-    | { status: "saved"; card: FudabaRegisteredCardReviewRecord }
+    | {
+          status: "saved";
+          card: FudabaRegisteredCardReviewRecord;
+          /** Live objects replaced by the promoted pending pages. */
+          replacedObjectKeys: string[];
+      }
     | {
           status: "conflict";
           revision: number;
@@ -793,9 +794,9 @@ export interface FudabaPublicCardRecord {
     /** Ordered series; the first entry is the label shown by default. */
     series_codes: string[];
     favorite_characters: CardFavoriteSelectionRecord[];
-    front_object_key: string;
+    /** 统一布局的线上页面行，按 display_order 排好。 */
+    pages: FudabaCardPageRecord[];
     middle_object_keys: string[];
-    back_object_key: string | null;
     accent: string;
     bio: string;
     trade_note: string;
@@ -958,13 +959,6 @@ export interface FudabaRepository {
         pageId: string,
         draft: boolean
     ): Promise<{ key: string; queue: 'live' | 'pending' } | null>;
-    /** 整体替换某一队列的页面行（迁移脚本使用；不碰对象与列）。 */
-    replaceCardPages(
-        cardId: string,
-        queue: 'live' | 'pending',
-        pages: readonly FudabaCardPageWrite[],
-        updatedAt: string
-    ): Promise<void>;
     /** 批量读取页面行：公开列表一次查询，避免逐卡 N+1。 */
     listCardPagesBatch(cardIds: readonly string[]): Promise<
         Map<string, { live: FudabaCardPageRecord[]; pending: FudabaCardPageRecord[] }>

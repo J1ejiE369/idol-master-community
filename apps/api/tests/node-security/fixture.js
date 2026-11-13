@@ -13,9 +13,6 @@ const {
     getSharedPostgresTestAllocator,
     postgresIntegrationEnabled
 } = require('../postgres-test-lifecycle.js');
-const {
-    legacyMediaObjectKey
-} = require('../../scripts/migration/namecard-unification-reconcile.js');
 const auth = require('./auth.owner.js');
 
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -39,8 +36,15 @@ function createNodeSecurityFixture({ test, beforeAll, afterAll }) {
         `/uploads/namecard/thumbnail/${path.basename(APPROVED_BACK_URL)}.jpg`;
     const PENDING_FRONT_THUMBNAIL_URL =
         `/uploads/namecard/thumbnail/${path.basename(PENDING_FRONT_URL)}.jpg`;
+    /** Public event poster the shared GET/HEAD/range media matrix reads. */
+    const EVENT_POSTER_URL = '/uploads/event/original/security-fixture-poster.png';
+    // `fudaba_card_pages` 是唯一媒体来源：每张种子名片都带一行 live 正/反面，
+    // 版本固定，页面行与落盘对象路径共用这份定义。
+    const CARD_PAGE_SEEDS = [
+        { pageId: 'front', order: 1, version: '11111111-1111-4111-8111-111111111111' },
+        { pageId: 'back', order: 2, version: '22222222-2222-4222-8222-222222222222' }
+    ];
 
-    let NAMECARD_DIR;
     let EVENT_DIR;
     let approvedCardId;
     let baseUrl;
@@ -51,7 +55,7 @@ function createNodeSecurityFixture({ test, beforeAll, afterAll }) {
     let server;
     let tempDir;
     let testDatabase;
-    let validJpeg;
+    let uploadsDir;
     let validPng;
 
     function run(db, sql, params = []) {
@@ -70,8 +74,36 @@ function createNodeSecurityFixture({ test, beforeAll, afterAll }) {
         return sql.replace(/\?/g, () => `$${++index}`);
     }
 
+    /**
+     * 版本化页面对象在文件系统存储里的落盘路径：`community/*` 命名空间挂在
+     * uploads 根目录下（见 `FilesystemObjectStorage.resolveKey`）。
+     */
+    function cardPageObjectPath(cardId, pageId, version) {
+        return path.join(
+            uploadsDir,
+            'community/fudaba/cards',
+            cardId,
+            'live',
+            `${pageId}.${version}.webp`
+        );
+    }
+
     async function seedLegacyNamecard(db, card) {
-        const { frontUrl, backUrl, hash1 = null, hash2 = null, ip = null, status } = card;
+        // `public.cards` is the retired legacy archive: no runtime surface reads
+        // its media columns any more (docs/architecture/namecard-surfaces.md §1),
+        // but they are NOT NULL, so a caller that seeds no legacy upload URL
+        // still needs an inert placeholder instead of resurrecting the old
+        // upload layout.
+        const LEGACY_ARCHIVE_FRONT_URL = '/legacy-archive/namecard/front.png';
+        const LEGACY_ARCHIVE_BACK_URL = '/legacy-archive/namecard/back.png';
+        const {
+            frontUrl = LEGACY_ARCHIVE_FRONT_URL,
+            backUrl = LEGACY_ARCHIVE_BACK_URL,
+            hash1 = null,
+            hash2 = null,
+            ip = null,
+            status
+        } = card;
         const inserted = await run(
             db,
             `INSERT INTO cards (image1_url, image2_url, hash1, hash2, ip, status)
@@ -83,20 +115,34 @@ function createNodeSecurityFixture({ test, beforeAll, afterAll }) {
             db,
             `INSERT INTO fudaba_cards
                 (id, card_number, origin, producer_name, exchange_mode,
-                 trade_note, front_object_key, back_object_key,
-                 publication_status, legacy_card_id,
+                 trade_note, publication_status, legacy_card_id,
                  revision, created_at, updated_at, deleted_at)
              VALUES (?, ?, 'legacy', NULL, 'none', NULL,
-                     ?, ?, ?, NULL, 0, CURRENT_TIMESTAMP,
+                     ?, NULL, 0, CURRENT_TIMESTAMP,
                      CURRENT_TIMESTAMP, NULL)`,
             [
                 `legacy-${legacyId}`,
                 legacyId,
-                legacyMediaObjectKey(frontUrl),
-                legacyMediaObjectKey(backUrl),
                 status === 'approved' ? 'published' : status
             ]
         );
+        const pageValues = CARD_PAGE_SEEDS.map(() =>
+            "(?, 'live', ?, ?, ?::uuid, 'live', 100, 50, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").join(', ');
+        await run(
+            db,
+            `INSERT INTO public.fudaba_card_pages
+                (card_id, queue, page_id, display_order, object_version,
+                 object_queue, width, height, created_at, updated_at)
+             VALUES ${pageValues}`,
+            CARD_PAGE_SEEDS.flatMap((page) => [`legacy-${legacyId}`, page.pageId, page.order, page.version])
+        );
+        // 页面行是唯一媒体来源，所以夹具必须把对应对象真正落盘：审核只发布
+        // 页面行解析出的版本化 key，公开媒体路由也只从这里读。
+        for (const page of CARD_PAGE_SEEDS) {
+            const objectPath = cardPageObjectPath(`legacy-${legacyId}`, page.pageId, page.version);
+            fs.mkdirSync(path.dirname(objectPath), { recursive: true });
+            fs.writeFileSync(objectPath, validPng);
+        }
         return legacyId;
     }
 
@@ -111,20 +157,6 @@ function createNodeSecurityFixture({ test, beforeAll, afterAll }) {
             IMS_UPLOADS_DIR: path.join(tempDir, `${label}-uploads`),
             IMS_EVENT_BASE_DIR: path.join(tempDir, `${label}-events`)
         };
-    }
-
-    function namecardObjectPath(publicUrl) {
-        const filename = path.basename(publicUrl);
-        const extension = path.extname(filename).toLowerCase();
-        const stem = path.basename(filename, extension);
-        return path.join(NAMECARD_DIR, stem, `image${extension}`);
-    }
-
-    function namecardThumbnailObjectPath(publicUrl) {
-        const filename = path.basename(publicUrl);
-        const extension = path.extname(filename).toLowerCase();
-        const stem = path.basename(filename, extension);
-        return path.join(NAMECARD_DIR, stem, 'thumbnail.jpg');
     }
 
     function rawRequest(requestPath, options = {}) {
@@ -149,12 +181,14 @@ function createNodeSecurityFixture({ test, beforeAll, afterAll }) {
         get APPROVED_BACK_THUMBNAIL_URL() { return APPROVED_BACK_THUMBNAIL_URL; },
         get APPROVED_BACK_URL() { return APPROVED_BACK_URL; },
         get APPROVED_FRONT_ROUTE_URL() { return `/api/cards/${approvedCardId}/media/front`; },
+
         get APPROVED_BACK_ROUTE_URL() { return `/api/cards/${approvedCardId}/media/back`; },
+
         get APPROVED_FRONT_THUMBNAIL_URL() { return APPROVED_FRONT_THUMBNAIL_URL; },
         get APPROVED_FRONT_URL() { return APPROVED_FRONT_URL; },
         get EVENT_DIR() { return EVENT_DIR; },
+        get EVENT_POSTER_URL() { return EVENT_POSTER_URL; },
         get LEGACY_SERVER_ENTRY() { return LEGACY_SERVER_ENTRY; },
-        get NAMECARD_DIR() { return NAMECARD_DIR; },
         get PENDING_FRONT_THUMBNAIL_URL() { return PENDING_FRONT_THUMBNAIL_URL; },
         get PENDING_FRONT_URL() { return PENDING_FRONT_URL; },
         get PROJECT_ROOT() { return PROJECT_ROOT; },
@@ -167,14 +201,11 @@ function createNodeSecurityFixture({ test, beforeAll, afterAll }) {
         get fixturePool() { return fixturePool; },
         get pendingCardId() { return pendingCardId; },
         get tempDir() { return tempDir; },
-        get validJpeg() { return validJpeg; },
         get validPng() { return validPng; },
         get,
         getOpSession() { return auth.getOpSession(fixture); },
         getOpToken() { return auth.getOpToken(fixture); },
         isolatedServerEnv,
-        namecardObjectPath,
-        namecardThumbnailObjectPath,
         rawRequest,
         run,
         seedLegacyNamecard,
@@ -185,11 +216,18 @@ function createNodeSecurityFixture({ test, beforeAll, afterAll }) {
         if (!postgresIntegrationEnabled()) return;
         process.env.IMS_ENV_FILE = '';
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ims-node-security-'));
-        const uploadsDir = path.join(tempDir, 'uploads');
-        NAMECARD_DIR = path.join(uploadsDir, 'community/namecards/assets');
+        uploadsDir = path.join(tempDir, 'uploads');
         EVENT_DIR = path.join(uploadsDir, 'editorial/events/assets');
-        fs.mkdirSync(NAMECARD_DIR, { recursive: true });
         fs.mkdirSync(EVENT_DIR, { recursive: true });
+        // 种子页面对象与事件海报共用同一份 PNG 字节，所以先生成再落盘。
+        validPng = await sharp({
+            create: {
+                width: 2,
+                height: 2,
+                channels: 3,
+                background: { r: 120, g: 40, b: 200 }
+            }
+        }).png().toBuffer();
         testDatabase = await getSharedPostgresTestAllocator().allocate({
             label: 'node-security'
         });
@@ -238,27 +276,9 @@ function createNodeSecurityFixture({ test, beforeAll, afterAll }) {
             'INSERT INTO users (username, password, dept, producername) VALUES (?, ?, ?, ?)',
             ['security-test-op', passwordHash, 'op', 'Security Test']
         );
-        const image = sharp({
-            create: {
-                width: 2,
-                height: 2,
-                channels: 3,
-                background: { r: 120, g: 40, b: 200 }
-            }
-        });
-        validPng = await image.clone().png().toBuffer();
-        validJpeg = await image.clone().jpeg().toBuffer();
-        for (const mediaUrl of [
-            APPROVED_FRONT_URL,
-            APPROVED_BACK_URL,
-            PENDING_FRONT_URL,
-            PENDING_BACK_URL
-        ]) {
-            const target = namecardObjectPath(mediaUrl);
-            fs.mkdirSync(path.dirname(target), { recursive: true });
-            fs.writeFileSync(target, validPng);
-            fs.writeFileSync(namecardThumbnailObjectPath(mediaUrl), validJpeg);
-        }
+        const eventPoster = path.join(EVENT_DIR, 'security-fixture-poster', 'poster.png');
+        fs.mkdirSync(path.dirname(eventPoster), { recursive: true });
+        fs.writeFileSync(eventPoster, validPng);
 
         process.env.NODE_ENV = 'test';
         process.env.IMS_JWT_SECRET = 'test-only-secret-with-sufficient-entropy';

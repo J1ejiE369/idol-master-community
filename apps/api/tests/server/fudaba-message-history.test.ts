@@ -116,3 +116,24 @@ test(
         expect(count?.max_z_index).toBe(Number(second.z_index));
     },
 );
+
+test.each(['wall', 'page-row'])('combined catalog upgrades the existing %s ledger', async (source) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ims-fudaba-upgrade-'));
+    onTestFinished(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const catalog = path.resolve('migrations/postgresql');
+    for (const filename of fs.readdirSync(catalog)) {
+        if (!filename.endsWith('.sql')) continue;
+        if (filename.startsWith('20261113100000') || filename.startsWith('20261112135000')) continue;
+        if (source === 'wall' && filename.startsWith('20261112')) continue;
+        if (source === 'page-row' && filename.startsWith('20261108')) continue;
+        fs.copyFileSync(path.join(catalog, filename), path.join(directory, filename));
+    }
+    const harness = await createPostgresTestHarness({ label: 'fudaba-upgrade', migrationsPath: directory });
+    onTestFinished(() => harness.close());
+    const { migratePostgres } = await import('../../scripts/migration/postgres-migrations.js');
+    const result = await migratePostgres({ connectionString: harness.databaseUrl });
+    expect(result.executed).toContain('20261112135000_fudaba_retire_legacy_preview_triggers');
+    expect(result.executed).toContain('20261113100000_fudaba_page_preview_invalidation');
+    const rerun = await migratePostgres({ connectionString: harness.databaseUrl });
+    expect(rerun.executed).toEqual([]);
+}, 30_000);

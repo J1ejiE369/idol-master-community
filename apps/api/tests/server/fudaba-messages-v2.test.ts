@@ -43,6 +43,14 @@ const noopSchema: SqlSchemaStrategy = {
     initializeFudaba: async () => {},
     initializeStory: async () => {},
 };
+async function seedFrontPages(database: Awaited<ReturnType<typeof createPostgresTestDatabase>>, pattern: string) {
+    await database.prepare(
+        `INSERT INTO fudaba_card_pages
+        (card_id, queue, page_id, display_order, object_version, width, height, created_at, updated_at)
+        SELECT id, 'live', 'front', 1, '11111111-1111-4111-8111-111111111111', 240, 160, created_at, updated_at
+        FROM fudaba_cards WHERE id LIKE ?`
+    ).bind(pattern).run();
+}
 const now = '2026-10-13T00:00:00.000Z';
 function message(result: FudabaMessageResult) {
     if (result.status !== 'ok')
@@ -347,7 +355,7 @@ test(
         const { database, repo } = await fixture();
         await database
             .prepare(
-                `INSERT INTO fudaba_cards(id,owner_account_id,producer_name,front_object_key,back_object_key,publication_status,created_at,updated_at) SELECT 'card-'||lpad(n::text,4,'0'),'owner','Producer','community/fudaba/'||n||'/front.webp','community/fudaba/'||n||'/back.webp','published',?::timestamptz,?::timestamptz FROM generate_series(1,500)n`
+                `INSERT INTO fudaba_cards(id,owner_account_id,producer_name,publication_status,created_at,updated_at) SELECT 'card-'||lpad(n::text,4,'0'),'owner','Producer','published',?::timestamptz,?::timestamptz FROM generate_series(1,500)n`
             )
             .bind(now, now)
             .run();
@@ -391,9 +399,10 @@ test(
                 .toBuffer()
         );
         assert.ok(tiny);
+        await seedFrontPages(database, 'card-%');
         await database
             .prepare(
-                "INSERT INTO fudaba_card_media_previews(object_key,asset_sha256,preview_data_url) SELECT front_object_key,repeat('a',64),? FROM fudaba_cards"
+                "INSERT INTO fudaba_card_media_previews(object_key,asset_sha256,preview_data_url) SELECT 'community/fudaba/cards/'||card_id||'/live/front.'||object_version||'.webp',repeat('a',64),? FROM fudaba_card_pages"
             )
             .bind(tiny)
             .run();
@@ -439,12 +448,12 @@ test(
         assert.equal(layoutKeys.size, 1000);
         await database
             .prepare(
-                "UPDATE fudaba_cards SET front_object_key=front_object_key WHERE id='card-0001'"
+                "UPDATE fudaba_card_pages SET object_version=object_version WHERE card_id='card-0001'"
             )
             .run();
         const invalidated = await database
             .prepare(
-                "SELECT object_key FROM fudaba_card_media_previews WHERE object_key='community/fudaba/1/front.webp'"
+                "SELECT object_key FROM fudaba_card_media_previews WHERE object_key='community/fudaba/cards/card-0001/live/front.11111111-1111-4111-8111-111111111111.webp'"
             )
             .all();
         assert.equal(invalidated.results.length, 0);
@@ -885,7 +894,7 @@ test(
         const { database, repo } = await fixture();
         await database
             .prepare(
-                "INSERT INTO fudaba_cards(id,owner_account_id,producer_name,front_object_key,back_object_key,publication_status,created_at,updated_at) VALUES('visitor-card','author','Author','community/fudaba/visitor/front.webp','community/fudaba/visitor/back.webp','published',?,?)"
+                "INSERT INTO fudaba_cards(id,owner_account_id,producer_name,publication_status,created_at,updated_at) VALUES('visitor-card','author','Author','published',?,?)"
             )
             .bind(now, now)
             .run();
@@ -1230,18 +1239,19 @@ test('scene layout uses measured heights in rotated queries and preserves legacy
 
 test('late previews cannot restore stale media after a concurrent replacement', async () => {
     const { database, repo } = await fixture();
-    const objectKey = 'community/fudaba/race/front.webp';
+    const objectKey = 'community/fudaba/cards/race-card/live/front.11111111-1111-4111-8111-111111111111.webp';
     await database
         .prepare(
             `INSERT INTO fudaba_cards
-        (id, owner_account_id, producer_name, front_object_key, back_object_key, publication_status, created_at, updated_at)
-        VALUES ('race-card', 'owner', 'Producer', ?, 'community/fudaba/race/back.webp', 'published', ?, ?)`
+        (id, owner_account_id, producer_name, publication_status, created_at, updated_at)
+        VALUES ('race-card', 'owner', 'Producer', 'published', ?, ?)`
         )
-        .bind(objectKey, now, now)
+        .bind(now, now)
         .run();
     await database.prepare(
         "INSERT INTO fudaba_card_series(card_id,series_code,display_order) VALUES('race-card','765',1)"
     ).run();
+    await seedFrontPages(database, 'race-card');
     const preview = 'data:image/webp;base64,UklGRg==';
     const guard = { cardId: 'race-card', revision: 0, side: 'front' as const };
     assert.equal(
@@ -1259,10 +1269,10 @@ test('late previews cannot restore stale media after a concurrent replacement', 
     const replacement = database.transaction(async (transaction) => {
         await transaction
             .prepare(
-                `UPDATE fudaba_cards SET revision = revision + 1,
-            front_object_key = front_object_key WHERE id = 'race-card'`
+                `UPDATE fudaba_cards SET revision = revision + 1 WHERE id = 'race-card'`
             )
             .run();
+        await transaction.prepare("UPDATE fudaba_card_pages SET object_version=object_version WHERE card_id='race-card'").run();
         locked();
         await mayCommit;
     });

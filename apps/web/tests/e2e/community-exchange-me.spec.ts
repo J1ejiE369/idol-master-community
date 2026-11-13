@@ -7,7 +7,6 @@ import type { PlatformProfile } from "@imsweb/contracts/platform"
 import { api, expect, test } from "./fixtures/test"
 import { makeCharacterCatalog } from "./fixtures/fudaba-characters"
 import { settleToasts } from "./fixtures/toast"
-import { installOfficePageDefaults } from "./fixtures/office-page-defaults"
 
 const avatarFixture = Buffer.from(
   `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240">
@@ -36,15 +35,39 @@ const card = {
   seriesCodes: ["765"],
   favoriteCharacters: [{ id: 1, name: "天海春香", seriesCode: "765" }],
   frontImageUrl: "/brand/series/wall/765pro.webp",
-  middleImageUrls: [],
   backImageUrl: "/brand/series/wall/cinderella-girls.webp",
+  // P4 起编辑器按页面行播种图片槽位；缺 pages 会让保存被本地校验拦下。
+  pages: [
+    {
+      pageId: "front",
+      role: "front" as const,
+      order: 1,
+      url: "/brand/series/wall/765pro.webp",
+      previewUrl: "/brand/series/wall/765pro.webp",
+      thumbUrl: "/brand/series/wall/765pro.webp",
+      width: 900,
+      height: 500,
+    },
+    {
+      pageId: "back",
+      role: "back" as const,
+      order: 2,
+      url: "/brand/series/wall/cinderella-girls.webp",
+      previewUrl: "/brand/series/wall/cinderella-girls.webp",
+      thumbUrl: "/brand/series/wall/cinderella-girls.webp",
+      width: 900,
+      height: 500,
+    },
+  ],
   accent: "#f34e6c",
   bio: "上海地区制作人",
   tradeNote: "周末现场交换",
   exchangeMode: "manual",
   madeOn: null,
   groupName: null,
+
   isGroupCard: false,
+
   producerReading: null,
   isOriginal: false,
   madeWithAi: false,
@@ -500,7 +523,6 @@ test.describe("account personal workspace", () => {
     api: dispatcher,
   }, testInfo) => {
     await page.emulateMedia({ reducedMotion: "reduce" })
-    installOfficePageDefaults(dispatcher, office.id, office)
     const consoleErrors: string[] = []
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text())
@@ -514,9 +536,7 @@ test.describe("account personal workspace", () => {
     await expect(page.locator("canvas.maplibregl-canvas")).toHaveCount(0)
     await expect(page.getByRole("textbox", { name: "显示名称" })).toBeVisible()
     await expect(
-      page
-        .getByLabel("我的名片清单")
-        .getByText("浏览器制作人", { exact: true })
+      page.getByLabel("我的名片清单").getByText("浏览器制作人", { exact: true })
     ).toBeHidden()
     await page.screenshot({
       path: `/tmp/imsweb-profile-workspace-profile-${testInfo.project.name}.png`,
@@ -682,13 +702,9 @@ test.describe("account personal workspace", () => {
     await page.getByRole("link", { name: /^交换名片/ }).click()
     await expect(page).toHaveURL(/\/account\/me\/namecards(?:[?#]|$)/)
     await expect(
-      page
-        .getByLabel("我的名片清单")
-        .getByText("浏览器制作人", { exact: true })
+      page.getByLabel("我的名片清单").getByText("浏览器制作人", { exact: true })
     ).toBeVisible()
-    await page
-      .getByRole("button", { name: /^浏览器制作人/ })
-      .click()
+    await page.getByRole("button", { name: /^浏览器制作人/ }).click()
     // 标题区在 dialog-header 里，副标题不在编辑器 section 内。
     await expect(
       page
@@ -714,9 +730,12 @@ test.describe("account personal workspace", () => {
     await page.getByRole("button", { name: "保存并提交" }).click()
     await expect(page.getByText("名片资料已保存。")).toBeVisible()
 
-    await page.getByLabel("名片图片顺序").getByRole("button", {
-      name: "第 2 张（背面）",
-    }).click()
+    await page
+      .getByLabel("名片图片顺序")
+      .getByRole("button", {
+        name: "第 2 张（背面）",
+      })
+      .click()
     await expect(
       page.getByLabel("名片图片").getByAltText("名片背面")
     ).toBeVisible()

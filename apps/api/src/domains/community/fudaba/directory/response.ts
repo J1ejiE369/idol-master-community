@@ -16,8 +16,8 @@ import type {
     NamecardUnitRecord,
 } from "@/ports/repositories";
 import { requirePublicObjectUrl } from "@/utils/storage/public-object-url";
+import { cardPageObjectKeys } from '@/domains/community/fudaba/cards/card-media-resolver';
 import type { CardPageView } from '@/domains/community/fudaba/cards/artwork-view';
-import { parseCardPageObjectKey } from '@/utils/storage/business-object-keys';
 
 export async function fudabaPublicOfficeView(
     storage: ObjectStorage | undefined,
@@ -66,29 +66,17 @@ export async function fudabaPublicCardView(
             status: 503,
         });
     }
-    const hasPageLayout = [card.front_object_key, ...(card.back_object_key ? [card.back_object_key] : [])]
-        .every(key => {
-            const parsed = parseCardPageObjectKey(key);
-            return parsed?.cardId === card.id && parsed.queue === 'live';
-        });
-    const completePages = pages?.length && (hasPageLayout || pages.length === 1 + card.middle_object_keys.length + (card.back_object_key ? 1 : 0))
-        ? pages : null;
-    const [frontImageUrl, middleImageUrls, backImageUrl] = completePages
-        ? [
-            completePages[0]!.url,
-            completePages.filter(page => page.role === 'middle').map(page => page.url),
-            completePages.find(page => page.role === 'back')?.url ?? null
-        ] as const
-        : await Promise.all([
-        requirePublicObjectUrl(storage, card.front_object_key),
-        Promise.all(
-            card.middle_object_keys.map((key) =>
-                requirePublicObjectUrl(storage, key),
-            ),
-        ),
-        card.back_object_key === null
-            ? Promise.resolve(null)
-            : requirePublicObjectUrl(storage, card.back_object_key),
+    // 页序就是版面：首页是正面，末页是背面，中间是其余页；单面卡只有正面。
+    const pageKeys = cardPageObjectKeys(card.id, 'live', card.pages);
+    const frontKey = pageKeys[0];
+    if (!frontKey) {
+        throw Object.assign(new Error("公开名片缺少页面"), { status: 503 });
+    }
+    const [frontImageUrl, backImageUrl] = await Promise.all([
+        requirePublicObjectUrl(storage, frontKey),
+        pageKeys.length > 1
+            ? requirePublicObjectUrl(storage, pageKeys[pageKeys.length - 1]!)
+            : Promise.resolve(null),
     ]);
     return {
         id: card.id,
@@ -100,7 +88,6 @@ export async function fudabaPublicCardView(
             seriesCode: character.agency_code,
         })),
         frontImageUrl,
-        middleImageUrls,
         backImageUrl,
         accent: card.accent,
         bio: card.bio,

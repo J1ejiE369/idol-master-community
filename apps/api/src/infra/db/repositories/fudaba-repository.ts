@@ -12,9 +12,9 @@ import {
     type CardSubmissionSnapshot,
 } from "@/ports/repositories/fudaba-review-policy";
 import {
-    cardPageObjectKey,
-    parseCardPageObjectKey
+    cardPageObjectKey
 } from "@/utils/storage/business-object-keys";
+import { syncNamecardPages } from "@/infra/db/repositories/namecard-page-sync";
 import type {
     AuditLogInput,
     CardFavoriteSelectionRecord,
@@ -113,6 +113,36 @@ import {
 } from "@/infra/db/repositories/namecard-notification-copy";
 import { insertNamecardNotification } from "@/infra/db/repositories/namecard-notification-repository";
 
+/**
+ * 线上页面行拼出的对象 key：
+ * `community/fudaba/cards/<cardId>/<objectQueue>/<pageId>.<version>.webp`。
+ * 旧 key 列退役后，正/反面预览从页面行取地址。
+ */
+function livePageKeyProjection(
+    cardAlias: string,
+    direction: 'ASC' | 'DESC',
+): string {
+    return `(SELECT 'community/fudaba/cards/' || ${cardAlias}.id || '/' ||
+                    page.object_queue || '/' || page.page_id || '.' ||
+                    page.object_version || '.webp'
+               FROM fudaba_card_pages page
+              WHERE page.card_id=${cardAlias}.id AND page.queue='live'
+              ORDER BY page.display_order ${direction} LIMIT 1)`;
+}
+
+/** 背面只在 live 页多于一张时存在；单面卡返回 NULL。 */
+function liveBackPageKeyProjection(cardAlias: string): string {
+    return `(SELECT CASE WHEN (SELECT COUNT(*) FROM fudaba_card_pages count_page
+                                WHERE count_page.card_id=${cardAlias}.id
+                                  AND count_page.queue='live') > 1
+                         THEN 'community/fudaba/cards/' || ${cardAlias}.id || '/' ||
+                              page.object_queue || '/' || page.page_id || '.' ||
+                              page.object_version || '.webp' END
+               FROM fudaba_card_pages page
+              WHERE page.card_id=${cardAlias}.id AND page.queue='live'
+              ORDER BY page.display_order DESC LIMIT 1)`;
+}
+
 const OFFICE_COLUMNS = `id, owner_account_id, slug, name, intro, city, address,
     latitude, longitude, accent, cover_object_key, pending_cover_object_key,
     pending_cover_submitted_at, is_open, visitor_count, status, revision,
@@ -144,12 +174,11 @@ const cardSeriesEligibility = (alias: string): string =>
     `(${alias}.wiki_enabled OR ${alias}.code='namecard-other')`;
 
 const CARD_COLUMNS = `id, card_number, owner_account_id, producer_name,
-    legacy_card_id, origin, front_object_key, back_object_key,
+    legacy_card_id, origin,
     accent, accent_source, bio, trade_note, exchange_mode, made_on, group_name, is_group_card, producer_reading,
     is_original,
     made_with_ai, visible, publication_status,
     review_status, review_reason, review_submitted_at, pending_payload,
-    pending_front_object_key, pending_middle_object_keys, pending_back_object_key,
     revision, created_at, updated_at, deleted_at`;
 const CLAIM_COLUMNS = `id, legacy_card_id, claimant_account_id, target_card_id,
     series_code, state, message, payload, review_note, reviewed_by, reviewed_at,
@@ -159,8 +188,8 @@ const ADMIN_CLAIM_COLUMNS = `claim.id, claim.legacy_card_id,
     claim.state, claim.message, claim.payload, claim.review_note, claim.reviewed_by,
     claim.reviewed_at, claim.revision, claim.created_at, claim.updated_at,
     profile.display_name AS claimant_display_name,
-    guest_card.front_object_key AS legacy_image1_url,
-    guest_card.back_object_key AS legacy_image2_url,
+    ${livePageKeyProjection('guest_card', 'ASC')} AS legacy_front_key,
+    ${liveBackPageKeyProjection('guest_card')} AS legacy_back_key,
     (SELECT target.card_number FROM fudaba_cards target
       WHERE target.id=claim.target_card_id) AS target_card_number`;
 const SUPPLEMENT_COLUMNS = `supplement.id, supplement.card_id,
@@ -171,7 +200,8 @@ const SUPPLEMENT_COLUMNS = `supplement.id, supplement.card_id,
     card.card_number AS card_number, card.producer_name AS card_producer_name,
     GREATEST((SELECT COUNT(*)::int FROM fudaba_card_pages page
      WHERE page.card_id=card.id AND page.queue='live') - 2, 0) AS card_middle_count,
-    (card.back_object_key IS NOT NULL) AS card_has_back,
+    ((SELECT COUNT(*)::int FROM fudaba_card_pages page
+       WHERE page.card_id=card.id AND page.queue='live') > 1) AS card_has_back,
     (SELECT COUNT(*)::int FROM fudaba_card_pages page
       WHERE page.card_id=card.id AND page.queue='live') AS card_page_count`;
 const MODERATION_COLUMNS = `id, resource_kind, resource_id,
@@ -206,8 +236,8 @@ type NamecardFeedbackRow = {
     created_at: Date | string;
     card_number: number | string;
     producer_name: string | null;
-    front_object_key: string;
-    back_object_key: string | null;
+    front_page_key: string;
+    back_page_key: string | null;
     middle_page_count: number | string;
     reporter_name: string;
 };
@@ -218,8 +248,8 @@ function feedbackRecord(row: NamecardFeedbackRow): NamecardFeedbackRecord {
         cardId: row.card_id,
         cardNumber: Number(row.card_number),
         producerName: row.producer_name,
-        frontObjectKey: row.front_object_key,
-        backObjectKey: row.back_object_key,
+        frontObjectKey: row.front_page_key,
+        backObjectKey: row.back_page_key,
         middlePageCount: Number(row.middle_page_count),
         reporterAccountId: row.reporter_account_id,
         reporterName: row.reporter_name,
@@ -231,8 +261,7 @@ function feedbackRecord(row: NamecardFeedbackRow): NamecardFeedbackRecord {
 }
 
 const PUBLIC_CARD_COLUMNS = `card.id, card.producer_name,
-    card.front_object_key,
-    card.back_object_key, card.accent, card.bio, card.trade_note,
+    card.accent, card.bio, card.trade_note,
     card.exchange_mode, card.made_on, card.group_name, card.producer_reading,
     card.is_original,
     card.made_with_ai, card.visible, card.created_at,
@@ -313,6 +342,8 @@ type FudabaCardRow = Omit<
     FudabaCardRecord,
     | "favorite_characters"
     | "middle_object_keys"
+    | "pages"
+    | "pending_pages"
     | "series_codes"
     | "credits"
     | "legacy_card_id"
@@ -387,8 +418,8 @@ type FudabaCardSupplementRow = Omit<
 
 type FudabaAdminCardClaimRow = FudabaCardClaimRow & {
     claimant_display_name: string;
-    legacy_image1_url: string;
-    legacy_image2_url: string | null;
+    legacy_front_key: string;
+    legacy_back_key: string | null;
     target_card_number: number | string | null;
 };
 
@@ -488,6 +519,7 @@ type FudabaPublicCardRow = Omit<
     | "bio"
     | "favorite_characters"
     | "middle_object_keys"
+    | "pages"
     | "credits"
     | "is_original"
     | "made_with_ai"
@@ -598,15 +630,39 @@ function pendingPayloadValue(
     return value as FudabaPendingCardPayload;
 }
 
+/** 页面行的对象 key；`object_queue` 缺席时按它所在队列推断。 */
+function pageObjectKey(
+    cardId: string,
+    queue: 'live' | 'pending',
+    page: FudabaCardPageRecord,
+): string {
+    return cardPageObjectKey(
+        cardId,
+        page.object_queue ?? queue,
+        page.page_id,
+        page.object_version,
+    );
+}
+
+/** 中间页 key：正面之后、背面之前的所有页，保持 display_order。 */
+function middlePageKeys(
+    cardId: string,
+    queue: 'live' | 'pending',
+    pages: readonly FudabaCardPageRecord[],
+): string[] {
+    return pages.slice(1, -1).map((page) => pageObjectKey(cardId, queue, page));
+}
+
 function cardRecord(row: FudabaCardRow): FudabaCardRecord {
     return {
         ...row,
         card_number: Number(row.card_number),
         favorite_characters: [],
         series_codes: [],
+        pages: [],
+        pending_pages: [],
         middle_object_keys: [],
         credits: [],
-        pending_middle_object_keys: row.pending_middle_object_keys ?? [],
         legacy_card_id:
             row.legacy_card_id === null ? null : Number(row.legacy_card_id),
         review_submitted_at: nullableTimestampValue(row.review_submitted_at),
@@ -709,8 +765,8 @@ function adminClaimRecord(
     return {
         ...claimRecord(row),
         claimant_display_name: row.claimant_display_name,
-        legacy_image1_url: row.legacy_image1_url,
-        legacy_image2_url: row.legacy_image2_url,
+        legacy_front_key: row.legacy_front_key,
+        legacy_back_key: row.legacy_back_key,
         target_card_number:
             row.target_card_number === null
                 ? null
@@ -725,6 +781,10 @@ function adminClaimRecord(
 function projectPendingContent(card: FudabaCardRecord): FudabaCardRecord {
     const payload = card.pending_payload;
     if (!payload || card.review_status !== "pending") return card;
+    // 待审页集是完整快照：有它就以它为准，否则说明这次修订只改文案。
+    const pendingPages = card.pending_pages;
+    const staged = pendingPages.length > 0;
+    const pages = staged ? pendingPages : card.pages;
     return {
         ...card,
         producer_name: payload.producer_name,
@@ -734,9 +794,12 @@ function projectPendingContent(card: FudabaCardRecord): FudabaCardRecord {
                   payload.favorite_character_ids.includes(character.character_id),
               )
             : [],
-        middle_object_keys: card.pending_middle_object_keys,
-        front_object_key: card.pending_front_object_key ?? card.front_object_key,
-        back_object_key: card.pending_back_object_key ?? card.back_object_key,
+        pages,
+        middle_object_keys: middlePageKeys(
+            card.id,
+            staged ? 'pending' : 'live',
+            pages,
+        ),
         bio: payload.bio,
         trade_note: payload.trade_note,
         exchange_mode: payload.exchange_mode,
@@ -875,9 +938,8 @@ function publicCardRecord(row: FudabaPublicCardRow): FudabaPublicCardRecord {
         series_codes: [],
         favorite_characters: [],
         middle_object_keys: [],
+        pages: [],
         credits: [],
-        front_object_key: row.front_object_key,
-        back_object_key: row.back_object_key,
         accent: row.accent ?? NAMECARD_ACCENT_FALLBACK,
         bio: row.bio ?? '',
         trade_note: row.trade_note,
@@ -1106,39 +1168,58 @@ export class SqlFudabaRepository implements FudabaRepository {
         }
     }
 
-    private async listCardMiddleMediaFrom(
+    /**
+     * Page rows of every card in one query: live and pending queues, ordered by
+     * display_order. Both the record attach and the media resolvers read from
+     * this single source.
+     */
+    private async listCardPagesFrom(
         database: SqlDatabase,
         cardIds: readonly string[],
-    ): Promise<Map<string, string[]>> {
-        const grouped = new Map<string, string[]>();
-        for (const cardId of cardIds) grouped.set(cardId, []);
+    ): Promise<
+        Map<
+            string,
+            { live: FudabaCardPageRecord[]; pending: FudabaCardPageRecord[] }
+        >
+    > {
+        const grouped = new Map<
+            string,
+            { live: FudabaCardPageRecord[]; pending: FudabaCardPageRecord[] }
+        >();
+        for (const cardId of cardIds) {
+            grouped.set(cardId, { live: [], pending: [] });
+        }
         if (!cardIds.length) return grouped;
         const placeholders = cardIds.map(() => "?").join(", ");
-        // Middle pages are derived from the live page rows: display order 2..
-        // n-1; the first and last page are the front and back.
         const rows = await queryAll<{
             card_id: string;
+            queue: 'live' | 'pending';
             page_id: string;
+            display_order: number | string;
             object_version: string;
+            object_queue: 'live' | 'pending' | null;
+            width: number | string;
+            height: number | string;
         }>(
             database,
-            `SELECT card_id, page_id, object_version FROM fudaba_card_pages
-             WHERE queue='live' AND card_id IN (${placeholders})
-             ORDER BY card_id, display_order`,
+            `SELECT card_id, queue, page_id, display_order, object_version,
+                    object_queue, width, height
+               FROM fudaba_card_pages
+              WHERE card_id IN (${placeholders})
+              ORDER BY card_id, queue, display_order`,
             [...cardIds],
         );
-        const pagesByCard = new Map<string, typeof rows>();
         for (const row of rows) {
-            const list = pagesByCard.get(row.card_id) ?? [];
-            list.push(row);
-            pagesByCard.set(row.card_id, list);
-        }
-        for (const [cardId, pages] of pagesByCard) {
-            for (const page of pages.slice(1, -1)) {
-                grouped.get(cardId)?.push(
-                    cardPageObjectKey(cardId, 'live', page.page_id, page.object_version),
-                );
-            }
+            const bucket = grouped.get(row.card_id);
+            if (!bucket) continue;
+            (row.queue === 'live' ? bucket.live : bucket.pending).push({
+                page_id: row.page_id,
+                display_order: Number(row.display_order),
+                object_version: row.object_version,
+                object_queue: row.object_queue ?? row.queue,
+                width: Number(row.width),
+                height: Number(row.height),
+            });
         }
         return grouped;
     }
@@ -1247,23 +1328,37 @@ export class SqlFudabaRepository implements FudabaRepository {
         },
     >(database: SqlDatabase, records: readonly Record[]): Promise<Record[]> {
         const ids = records.map((record) => record.id);
-        const [characters, middleKeys, credits, seriesCodes] =
+        const [characters, pagesByCard, credits, seriesCodes] =
             await Promise.all([
                 this.listCardFavoritesFrom(database, ids),
-                this.listCardMiddleMediaFrom(database, ids),
+                this.listCardPagesFrom(database, ids),
                 this.listCardCreditsFrom(database, ids),
                 this.listCardSeriesFrom(database, ids),
             ]);
-        return records.map(
-            (record) =>
-                ({
-                    ...record,
-                    favorite_characters: characters.get(record.id) ?? [],
-                    middle_object_keys: middleKeys.get(record.id) ?? [],
-                    credits: credits.get(record.id) ?? [],
-                    series_codes: seriesCodes.get(record.id) ?? [],
-                }) as Record,
-        );
+        return records.map((record) => {
+            const pages = pagesByCard.get(record.id) ?? {
+                live: [],
+                pending: [],
+            };
+            return {
+                ...record,
+                favorite_characters: characters.get(record.id) ?? [],
+                pages: pages.live,
+                pending_pages: pages.pending,
+                middle_object_keys: pages.live
+                    .slice(1, -1)
+                    .map((page) =>
+                        cardPageObjectKey(
+                            record.id,
+                            page.object_queue ?? 'live',
+                            page.page_id,
+                            page.object_version,
+                        ),
+                    ),
+                credits: credits.get(record.id) ?? [],
+                series_codes: seriesCodes.get(record.id) ?? [],
+            } as Record;
+        });
     }
 
     private async listCardSeriesFrom(
@@ -1819,11 +1914,12 @@ export class SqlFudabaRepository implements FudabaRepository {
             page_id: string;
             display_order: number | string;
             object_version: string;
+            object_queue?: 'live' | 'pending';
             width: number | string;
             height: number | string;
         }>(
             this.database,
-            `SELECT queue, page_id, display_order, object_version, width, height
+            `SELECT queue, page_id, display_order, object_version, object_queue, width, height
                FROM fudaba_card_pages
               WHERE card_id=?
               ORDER BY queue, display_order`,
@@ -1836,6 +1932,7 @@ export class SqlFudabaRepository implements FudabaRepository {
                 page_id: row.page_id,
                 display_order: Number(row.display_order),
                 object_version: row.object_version,
+                object_queue: row.object_queue ?? row.queue,
                 width: Number(row.width),
                 height: Number(row.height)
             };
@@ -1850,9 +1947,9 @@ export class SqlFudabaRepository implements FudabaRepository {
         pageId: string,
         draft: boolean
     ): Promise<{ key: string; queue: 'live' | 'pending' } | null> {
-        const row = await queryOne<{ object_version: string }>(
+        const row = await queryOne<{ object_version: string; object_queue?: 'live' | 'pending' }>(
             this.database,
-            `SELECT page.object_version
+            `SELECT page.object_version, page.object_queue
                FROM fudaba_cards card
                JOIN fudaba_card_pages page
                  ON page.card_id=card.id AND page.page_id=?
@@ -1865,22 +1962,14 @@ export class SqlFudabaRepository implements FudabaRepository {
         if (!row) return null;
         const queue = draft ? 'pending' : 'live';
         return {
-            key: cardPageObjectKey(cardId, queue, pageId, row.object_version),
+            key: cardPageObjectKey(
+                cardId,
+                row.object_queue ?? queue,
+                pageId,
+                row.object_version
+            ),
             queue
         };
-    }
-
-    async replaceCardPages(
-        cardId: string,
-        queue: 'live' | 'pending',
-        pages: readonly FudabaCardPageWrite[],
-        updatedAt: string
-    ): Promise<void> {
-        await this.serializeWrite(() =>
-            this.database.transaction((database) =>
-                this.writeCardPages(database, cardId, queue, pages, updatedAt)
-            )
-        );
     }
 
     async listCardPagesBatch(cardIds: readonly string[]): Promise<
@@ -1901,11 +1990,12 @@ export class SqlFudabaRepository implements FudabaRepository {
             page_id: string;
             display_order: number | string;
             object_version: string;
+            object_queue?: 'live' | 'pending';
             width: number | string;
             height: number | string;
         }>(
             this.database,
-            `SELECT card_id, queue, page_id, display_order, object_version, width, height
+            `SELECT card_id, queue, page_id, display_order, object_version, object_queue, width, height
                FROM fudaba_card_pages
               WHERE card_id IN (${placeholders})
               ORDER BY card_id, queue, display_order`,
@@ -1918,6 +2008,7 @@ export class SqlFudabaRepository implements FudabaRepository {
                 page_id: row.page_id,
                 display_order: Number(row.display_order),
                 object_version: row.object_version,
+                object_queue: row.object_queue ?? row.queue,
                 width: Number(row.width),
                 height: Number(row.height)
             });
@@ -1943,12 +2034,13 @@ export class SqlFudabaRepository implements FudabaRepository {
             page_id: string;
             display_order: number | string;
             object_version: string;
+            object_queue?: 'live' | 'pending';
             width: number | string;
             height: number | string;
         }>(
             this.database,
             `SELECT card.card_number, page.queue, page.page_id, page.display_order,
-                    page.object_version, page.width, page.height
+                    page.object_version, page.object_queue, page.width, page.height
                FROM fudaba_cards card
                JOIN fudaba_card_pages page ON page.card_id=card.id
               WHERE card.card_number IN (${placeholders})
@@ -1963,6 +2055,7 @@ export class SqlFudabaRepository implements FudabaRepository {
                 page_id: row.page_id,
                 display_order: Number(row.display_order),
                 object_version: row.object_version,
+                object_queue: row.object_queue ?? row.queue,
                 width: Number(row.width),
                 height: Number(row.height)
             });
@@ -2192,7 +2285,8 @@ export class SqlFudabaRepository implements FudabaRepository {
                     feedback.reporter_account_id, feedback.reason,
                     feedback.detail, feedback.status, feedback.created_at,
                     card.card_number, card.producer_name,
-                    card.front_object_key, card.back_object_key,
+                    ${livePageKeyProjection('card', 'ASC')} AS front_page_key,
+                    ${liveBackPageKeyProjection('card')} AS back_page_key,
                     GREATEST((SELECT COUNT(*)::int FROM fudaba_card_pages page
                       WHERE page.card_id=card.id AND page.queue='live') - 2, 0)
                         AS middle_page_count,
@@ -2230,7 +2324,8 @@ export class SqlFudabaRepository implements FudabaRepository {
                     handled.reporter_account_id, handled.reason,
                     handled.detail, handled.status, handled.created_at,
                     card.card_number, card.producer_name,
-                    card.front_object_key, card.back_object_key,
+                    ${livePageKeyProjection('card', 'ASC')} AS front_page_key,
+                    ${liveBackPageKeyProjection('card')} AS back_page_key,
                     GREATEST((SELECT COUNT(*)::int FROM fudaba_card_pages page
                       WHERE page.card_id=card.id AND page.queue='live') - 2, 0)
                         AS middle_page_count,
@@ -3281,19 +3376,16 @@ export class SqlFudabaRepository implements FudabaRepository {
                     database,
                     `INSERT INTO fudaba_cards
                     (id, owner_account_id, producer_name, producer_reading,
-                     legacy_card_id, front_object_key,
-                     back_object_key, bio, trade_note, exchange_mode,
+                     legacy_card_id, bio, trade_note, exchange_mode,
                      made_on, group_name, is_group_card, is_original, made_with_ai, visible,
                      publication_status, revision, created_at, updated_at, deleted_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         input.id,
                         input.ownerAccountId,
                         input.producerName,
                         input.producerReading ?? null,
                         input.legacyCardId ?? null,
-                        input.frontObjectKey,
-                        input.backObjectKey ?? null,
                         input.bio,
                         input.tradeNote,
                         input.exchangeMode,
@@ -3312,6 +3404,15 @@ export class SqlFudabaRepository implements FudabaRepository {
                 );
                 await this.replaceCardFavorites(database, input.id, characters);
                 await this.replaceCardSeries(database, input.id, input.seriesCodes);
+                if (input.pages?.length) {
+                    await this.writeCardPages(
+                        database,
+                        input.id,
+                        'live',
+                        input.pages,
+                        input.updatedAt,
+                    );
+                }
                 const row = await queryOne<FudabaCardRow>(
                     database,
                     `SELECT ${CARD_COLUMNS} FROM fudaba_cards WHERE id=?`,
@@ -3450,94 +3551,6 @@ export class SqlFudabaRepository implements FudabaRepository {
      * 把最终页序同步进页面表：新页插入，已知页只更新顺序，页集外的行删除。
      * 旧布局的槽位没有页面行，解析结果里自然缺席，等迁移补齐。
      */
-    private async syncCardPages(
-        database: SqlDatabase,
-        cardId: string,
-        queue: 'live' | 'pending',
-        orderedKeys: readonly (string | null)[],
-        written: readonly FudabaCardPageWrite[],
-        updatedAt: string,
-    ): Promise<void> {
-        const parsed = orderedKeys
-            .map((key) => (key ? parseCardPageObjectKey(key) : null))
-            .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-            .filter((entry) => entry.queue === queue);
-        if (parsed.length === 0) return;
-        const byPage = new Map(written.map((page) => [page.pageId, page]));
-        // 整体挪开顺序，交换位置时不会撞 (card, queue, order) 唯一约束。
-        await executeSql(
-            database,
-            `UPDATE fudaba_card_pages SET display_order = display_order + 1000
-              WHERE card_id=? AND queue=?`,
-            [cardId, queue],
-        );
-        const ids = parsed.map((entry) => entry.pageId);
-        // 只有整套页都能解析成新布局时才敢删页集外的行；混有旧 key 时保留，
-        // 由迁移脚本统一补齐。
-        const presentCount = orderedKeys.filter((key) => Boolean(key)).length;
-        if (parsed.length === presentCount) {
-            await executeSql(
-                database,
-                `DELETE FROM fudaba_card_pages
-                  WHERE card_id=? AND queue=? AND page_id NOT IN (${ids.map(() => '?').join(',')})`,
-                [cardId, queue, ...ids],
-            );
-        }
-        for (const [index, entry] of parsed.entries()) {
-            const page = byPage.get(entry.pageId);
-            if (page) {
-                await executeSql(
-                    database,
-                    `INSERT INTO fudaba_card_pages
-                     (card_id, queue, page_id, display_order, object_version,
-                      width, height, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                     ON CONFLICT (card_id, queue, page_id) DO UPDATE SET
-                       display_order=EXCLUDED.display_order,
-                       object_version=EXCLUDED.object_version,
-                       width=EXCLUDED.width, height=EXCLUDED.height,
-                       updated_at=EXCLUDED.updated_at`,
-                    [
-                        cardId,
-                        queue,
-                        entry.pageId,
-                        index + 1,
-                        entry.version,
-                        page.width,
-                        page.height,
-                        updatedAt,
-                        updatedAt,
-                    ],
-                );
-            } else {
-                await executeSql(
-                    database,
-                    `UPDATE fudaba_card_pages SET display_order=?, updated_at=?
-                      WHERE card_id=? AND queue=? AND page_id=?`,
-                    [index + 1, updatedAt, cardId, queue, entry.pageId],
-                );
-            }
-        }
-        // 混合布局下，未解析的旧页行在整体挪位后按原顺序接在新页之后。
-        const leftovers = await queryAll<{ page_id: string }>(
-            database,
-            `SELECT page_id FROM fudaba_card_pages
-              WHERE card_id=? AND queue=? AND display_order>=1000
-              ORDER BY display_order`,
-            [cardId, queue]
-        );
-        let nextOrder = parsed.length + 1;
-        for (const row of leftovers) {
-            await executeSql(
-                database,
-                `UPDATE fudaba_card_pages SET display_order=?, updated_at=?
-                  WHERE card_id=? AND queue=? AND page_id=?`,
-                [nextOrder, updatedAt, cardId, queue, row.page_id]
-            );
-            nextOrder += 1;
-        }
-    }
-
     private async writeCardPages(
         database: SqlDatabase,
         cardId: string,
@@ -3555,14 +3568,15 @@ export class SqlFudabaRepository implements FudabaRepository {
                 database,
                 `INSERT INTO fudaba_card_pages
                  (card_id, queue, page_id, display_order, object_version,
-                  width, height, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  object_queue, width, height, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     cardId,
                     queue,
                     page.pageId,
                     index + 1,
                     page.objectVersion,
+                    page.objectQueue ?? queue,
                     page.width,
                     page.height,
                     updatedAt,
@@ -3593,11 +3607,11 @@ export class SqlFudabaRepository implements FudabaRepository {
                     .prepare(
                         `INSERT INTO fudaba_cards
                     (id, owner_account_id, producer_name, producer_reading,
-                     front_object_key, back_object_key, bio, trade_note,
+                     bio, trade_note,
                      exchange_mode, made_on, group_name, is_group_card, is_original,
                      made_with_ai, visible, publication_status, revision,
                      created_at, updated_at, deleted_at)
-                 SELECT ?, account.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, NULL
+                 SELECT ?, account.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, NULL
                  FROM platform_accounts account
                  JOIN agencies series
                    ON series.code=? AND ${cardSeriesEligibility("series")}
@@ -3610,8 +3624,6 @@ export class SqlFudabaRepository implements FudabaRepository {
                         input.id,
                         input.producerName,
                         input.producerReading ?? null,
-                        input.frontObjectKey,
-                        input.backObjectKey ?? null,
                         input.bio,
                         input.tradeNote,
                         input.exchangeMode,
@@ -3707,11 +3719,17 @@ export class SqlFudabaRepository implements FudabaRepository {
                 if (input.isGroupCard === undefined && current) {
                     payload.is_group_card = current.is_group_card;
                 }
-                const currentMiddleKeys = current
-                    ? (await this.listCardMiddleMediaFrom(database, [input.cardId])).get(
-                          input.cardId,
-                      ) ?? []
-                    : [];
+                // 页面行是唯一媒体来源：比较当前 live/暂存两套页集时先取页面行。
+                const currentPages = current
+                    ? (
+                          await this.listCardPagesFrom(database, [input.cardId])
+                      ).get(input.cardId)
+                    : undefined;
+                const currentArtwork = {
+                    id: input.cardId,
+                    pages: currentPages?.live ?? [],
+                    pending_pages: currentPages?.pending ?? [],
+                };
                 // Resubmitting the approved copy — a mistaken save, or an owner
                 // changing their mind while a revision waits — withdraws the
                 // staged revision instead of queueing an identical one.
@@ -3725,15 +3743,14 @@ export class SqlFudabaRepository implements FudabaRepository {
                         payload,
                     ) &&
                     sameArtworkOrder(
-                        this.stagedArtworkKeys(current, currentMiddleKeys),
-                        this.liveArtworkKeys(current, currentMiddleKeys),
+                        this.stagedArtworkKeys(currentArtwork),
+                        this.liveArtworkKeys(currentArtwork),
                     )
                 ) {
                     const withdrawn = await database
                         .prepare(
                             `UPDATE fudaba_cards
-                 SET pending_payload=NULL, pending_front_object_key=NULL,
-                     pending_back_object_key=NULL, pending_middle_object_keys='{}'::text[],
+                 SET pending_payload=NULL,
                      review_status=NULL, review_reason=NULL, review_submitted_at=NULL,
                      revision=revision+1, updated_at=?
                  WHERE id=? AND owner_account_id=? AND revision=?
@@ -3757,6 +3774,14 @@ export class SqlFudabaRepository implements FudabaRepository {
                             input.expectedRevision,
                         );
                     }
+                    // 撤回修订也必须清掉 pending 页行，否则属主再打开编辑窗
+                    // 仍会看到已经放弃的页。
+                    await executeSql(
+                        database,
+                        `DELETE FROM public.fudaba_card_pages
+                          WHERE card_id=? AND queue='pending'`,
+                        [input.cardId],
+                    );
                     const restoredResult = await this.savedCardResult(
                         restored,
                         null,
@@ -3765,9 +3790,9 @@ export class SqlFudabaRepository implements FudabaRepository {
                     if (restoredResult.status === "saved") {
                         // Staged pages the approved copy never used can be
                         // dropped; the shared ones are still on the wall.
-                        const live = this.liveArtworkKeys(current, currentMiddleKeys);
+                        const live = this.liveArtworkKeys(currentArtwork);
                         restoredResult.previousObjectKeys =
-                            this.stagedArtworkKeys(current, currentMiddleKeys).filter(
+                            this.stagedArtworkKeys(currentArtwork).filter(
                                 (key) => !live.includes(key),
                             );
                     }
@@ -3870,8 +3895,6 @@ export class SqlFudabaRepository implements FudabaRepository {
                      visible=CASE WHEN publication_status='published' THEN visible ELSE ? END,
                      is_group_card=CASE WHEN publication_status='published'
                          THEN is_group_card ELSE ? END,
-                     pending_middle_object_keys=CASE WHEN publication_status='published'
-                         AND pending_payload IS NULL THEN ? ELSE pending_middle_object_keys END,
                      pending_payload=CASE WHEN publication_status='published' THEN CAST(? AS jsonb) ELSE pending_payload END,
                      review_status=CASE WHEN publication_status='published' THEN 'pending' ELSE review_status END,
                      review_reason=CASE WHEN publication_status='published' THEN NULL ELSE review_reason END,
@@ -3905,7 +3928,6 @@ export class SqlFudabaRepository implements FudabaRepository {
                         this.bindBoolean(payload.made_with_ai),
                         this.bindBoolean(payload.visible),
                         this.bindBoolean(payload.is_group_card),
-                        currentMiddleKeys,
                         JSON.stringify(payload),
                         input.updatedAt,
                         input.updatedAt,
@@ -3948,12 +3970,6 @@ export class SqlFudabaRepository implements FudabaRepository {
         );
     }
 
-    /**
-     * Middle pages are an ordered list, so the editor sends the complete set
-     * and this writes it as one unit. A published card stages the new pages on
-     * the row (`pending_middle_object_keys`) exactly like front/back do, so the
-     * wall keeps serving the reviewed pages until the revision is approved.
-     */
     /**
      * A published card can start a revision from one attachment only; the review
      * still needs the whole submission, so the live copy seeds `pending_payload`.
@@ -4017,36 +4033,28 @@ export class SqlFudabaRepository implements FudabaRepository {
         };
     }
 
-    /** Approved pages in display order: front, the middle pages, then the back. */
-    private liveArtworkKeys(
-        row: FudabaCardRow,
-        middles: readonly string[],
-    ): string[] {
-        return [row.front_object_key, ...middles, row.back_object_key].filter(
-            (key): key is string => key !== null,
-        );
+    /** 线上页集的对象 key，按 display_order：正面、中间页、背面。 */
+    private liveArtworkKeys(card: Pick<FudabaCardRecord, "id" | "pages">): string[] {
+        return card.pages.map((page) => pageObjectKey(card.id, "live", page));
     }
 
-    /** Pages the owner currently edits, i.e. the staged set when one exists. */
+    /** 属主正在编辑的那一套：有暂存页集就是它，否则是线上页集。 */
     private stagedArtworkKeys(
-        row: FudabaCardRow,
-        middles: readonly string[],
+        card: Pick<FudabaCardRecord, "id" | "pages" | "pending_pages">,
     ): string[] {
-        return [
-            row.pending_front_object_key ?? row.front_object_key,
-            ...(row.pending_middle_object_keys.length > 0
-                ? row.pending_middle_object_keys
-                : middles),
-            row.pending_back_object_key ?? row.back_object_key,
-        ].filter((key): key is string => key !== null);
+        // 暂存页集是完整快照：中间页被全部删除时它就是空的那一套，不能再回退
+        // 线上页集，否则下一次保存文案会把「已删除的中间页」当成没删过。
+        const staged = card.pending_pages.length > 0;
+        const pages = staged ? card.pending_pages : card.pages;
+        return pages.map((page) =>
+            pageObjectKey(card.id, staged ? "pending" : "live", page),
+        );
     }
 
-    private hasStagedArtwork(row: FudabaCardRow): boolean {
-        return (
-            row.pending_front_object_key !== null ||
-            row.pending_back_object_key !== null ||
-            row.pending_middle_object_keys.length > 0
-        );
+    private hasStagedArtwork(
+        card: Pick<FudabaCardRecord, "pending_pages">,
+    ): boolean {
+        return card.pending_pages.length > 0;
     }
 
     replaceCardMediaForOwner(
@@ -4070,23 +4078,17 @@ export class SqlFudabaRepository implements FudabaRepository {
                     ...input.middleObjectKeys,
                     input.backObjectKey,
                 ];
-                // The submitted set replaces whichever surface the owner edits:
-                // the staged set of a published card, otherwise the live one.
-                const previousObjectKeys = published
-                    ? [
-                          current.pending_front_object_key ??
-                              current.front_object_key,
-                          current.pending_back_object_key ??
-                              current.back_object_key,
-                          ...(current.pending_middle_object_keys.length > 0
-                              ? current.pending_middle_object_keys
-                              : current.middle_object_keys),
-                      ].filter((key): key is string => key !== null)
-                    : [
-                          current.front_object_key,
-                          current.back_object_key,
-                          ...current.middle_object_keys,
-                      ].filter((key): key is string => key !== null);
+                // 页面行是唯一媒体来源：提交的整套顺序覆盖属主正在编辑的那一套。
+                const submittedKeys = orderedSurface.filter(
+                    (key): key is string => key !== null,
+                );
+                const surfaceKeys = published
+                    ? this.stagedArtworkKeys(current)
+                    : this.liveArtworkKeys(current);
+                // The submitted set replaces whichever surface the owner edits,
+                // so the objects that set currently references are the replaced
+                // ones.
+                const previousObjectKeys = [...surfaceKeys];
                 // Moving existing pages around changes nothing reviewers read, so
                 // it lands on the surface the owner edits instead of queueing a
                 // revision. A staged revision keeps its own page set.
@@ -4098,17 +4100,6 @@ export class SqlFudabaRepository implements FudabaRepository {
                        WHERE account.id=fudaba_cards.owner_account_id
                          AND account.status='active' AND account.deleted_at IS NULL
                    )`;
-                const liveMiddles = (
-                    await this.listCardMiddleMediaFrom(database, [input.cardId])
-                ).get(input.cardId) ?? [];
-                const submittedKeys = [
-                    input.frontObjectKey,
-                    ...input.middleObjectKeys,
-                    input.backObjectKey,
-                ].filter((key): key is string => key !== null);
-                const surfaceKeys = published
-                    ? this.stagedArtworkKeys(current, liveMiddles)
-                    : this.liveArtworkKeys(current, liveMiddles);
                 if (published && sameArtworkOrder(submittedKeys, surfaceKeys)) {
                     return this.savedCardResult(current, null, database);
                 }
@@ -4118,23 +4109,12 @@ export class SqlFudabaRepository implements FudabaRepository {
                     const staged = this.hasStagedArtwork(current);
                     const reordered = await database
                         .prepare(
-                            staged
-                                ? `UPDATE fudaba_cards
-                 SET pending_front_object_key=?, pending_back_object_key=?,
-                     pending_middle_object_keys=?,
-                     revision=revision+1, updated_at=?
-                 WHERE ${guards}
-                 RETURNING ${CARD_COLUMNS}`
-                                : `UPDATE fudaba_cards
-                 SET front_object_key=?, back_object_key=?,
-                     revision=revision+1, updated_at=?
+                            `UPDATE fudaba_cards
+                 SET revision=revision+1, updated_at=?
                  WHERE ${guards}
                  RETURNING ${CARD_COLUMNS}`,
                         )
                         .bind(
-                            input.frontObjectKey,
-                            input.backObjectKey,
-                            ...(staged ? [input.middleObjectKeys] : []),
                             input.updatedAt,
                             input.cardId,
                             input.ownerAccountId,
@@ -4151,7 +4131,7 @@ export class SqlFudabaRepository implements FudabaRepository {
                             input.expectedRevision,
                         );
                     }
-                    await this.syncCardPages(
+                    await syncNamecardPages(
                         database,
                         input.cardId,
                         staged ? "pending" : "live",
@@ -4167,15 +4147,15 @@ export class SqlFudabaRepository implements FudabaRepository {
                         : null;
                 const accent = input.accent ?? null;
                 // Two statements instead of one CASE pile: the staged and live
-                // columns differ, and every previous edit bug here came from a
-                // bind list drifting out of step with the placeholders.
+                // surfaces differ, and every previous edit bug here came from a
+                // bind list drifting out of step with the placeholders. The
+                // artwork itself lives in the page rows, written by the
+                // `syncNamecardPages` call below.
                 const statement = published
                     ? database
                           .prepare(
                               `UPDATE fudaba_cards
-                 SET pending_front_object_key=?, pending_back_object_key=?,
-                     pending_middle_object_keys=?,
-                     review_status='pending', review_reason=NULL,
+                 SET review_status='pending', review_reason=NULL,
                      review_submitted_at=?,
                      pending_payload=COALESCE(pending_payload, CAST(? AS jsonb)),
                      accent=COALESCE(CAST(? AS text), accent),
@@ -4185,9 +4165,6 @@ export class SqlFudabaRepository implements FudabaRepository {
                  RETURNING ${CARD_COLUMNS}`,
                           )
                           .bind(
-                              input.frontObjectKey,
-                              input.backObjectKey,
-                              input.middleObjectKeys,
                               input.updatedAt,
                               pendingPayload === null
                                   ? null
@@ -4202,16 +4179,13 @@ export class SqlFudabaRepository implements FudabaRepository {
                     : database
                           .prepare(
                               `UPDATE fudaba_cards
-                 SET front_object_key=?, back_object_key=?,
-                     accent=COALESCE(CAST(? AS text), accent),
+                 SET accent=COALESCE(CAST(? AS text), accent),
                      accent_source=CASE WHEN CAST(? AS text) IS NULL THEN accent_source ELSE 'image' END,
                      revision=revision+1, updated_at=?
                  WHERE ${guards}
                  RETURNING ${CARD_COLUMNS}`,
                           )
                           .bind(
-                              input.frontObjectKey,
-                              input.backObjectKey,
                               accent,
                               accent,
                               input.updatedAt,
@@ -4230,7 +4204,7 @@ export class SqlFudabaRepository implements FudabaRepository {
                         input.expectedRevision,
                     );
                 }
-                await this.syncCardPages(
+                await syncNamecardPages(
                     database,
                     input.cardId,
                     published ? "pending" : "live",
@@ -4267,19 +4241,9 @@ export class SqlFudabaRepository implements FudabaRepository {
                         input.expectedRevision,
                     );
                 }
-                const previousObjectKeys = [
-                    input.staged
-                        ? (current.pending_front_object_key ??
-                          current.front_object_key)
-                        : current.front_object_key,
-                    input.staged
-                        ? (current.pending_back_object_key ??
-                          current.back_object_key)
-                        : current.back_object_key,
-                    ...(input.staged
-                        ? current.pending_middle_object_keys
-                        : current.middle_object_keys),
-                ].filter((key): key is string => key !== null);
+                const previousObjectKeys = input.staged
+                    ? this.stagedArtworkKeys(current)
+                    : this.liveArtworkKeys(current);
                 const guards = `id=? AND owner_account_id=? AND revision=?
                    AND deleted_at IS NULL
                    AND publication_status NOT IN ('approving', 'locked')
@@ -4289,25 +4253,15 @@ export class SqlFudabaRepository implements FudabaRepository {
                          AND account.status='active' AND account.deleted_at IS NULL
                    )`;
                 // 只换图：状态、待审标记、payload 都不动，因此不需要审核。
+                // 页面行由 syncNamecardPages 按提交的键重写。
                 const rotated = await database
                     .prepare(
-                        input.staged
-                            ? `UPDATE fudaba_cards
-                 SET pending_front_object_key=?, pending_back_object_key=?,
-                     pending_middle_object_keys=?,
-                     revision=revision+1, updated_at=?
-                 WHERE ${guards}
-                 RETURNING ${CARD_COLUMNS}`
-                            : `UPDATE fudaba_cards
-                 SET front_object_key=?, back_object_key=?,
-                     revision=revision+1, updated_at=?
+                        `UPDATE fudaba_cards
+                 SET revision=revision+1, updated_at=?
                  WHERE ${guards}
                  RETURNING ${CARD_COLUMNS}`,
                     )
                     .bind(
-                        input.frontObjectKey,
-                        input.backObjectKey,
-                        ...(input.staged ? [input.middleObjectKeys] : []),
                         input.updatedAt,
                         input.cardId,
                         input.ownerAccountId,
@@ -4324,7 +4278,7 @@ export class SqlFudabaRepository implements FudabaRepository {
                         input.expectedRevision,
                     );
                 }
-                await this.syncCardPages(
+                await syncNamecardPages(
                     database,
                     input.cardId,
                     input.staged ? "pending" : "live",
@@ -4358,8 +4312,7 @@ export class SqlFudabaRepository implements FudabaRepository {
                     `UPDATE fudaba_cards
                  SET publication_status='hidden', lock_reason=NULL,
                      review_status=NULL, review_reason=NULL, review_submitted_at=NULL,
-                     pending_payload=NULL, pending_front_object_key=NULL,
-                     pending_back_object_key=NULL, pending_middle_object_keys='{}'::text[],
+                     pending_payload=NULL,
                      updated_at=?, revision=revision+1
                  WHERE id=? AND owner_account_id=? AND revision=?
                    AND deleted_at IS NULL
@@ -4379,7 +4332,16 @@ export class SqlFudabaRepository implements FudabaRepository {
                 )
                 .run<FudabaCardRow>();
             const saved = result.results[0];
-            if (saved) return this.savedCardResult(saved, null);
+            if (saved) {
+                // 隐藏即放弃暂存修订：待审页行一并清掉，否则重新公开时旧快照会复活。
+                await executeSql(
+                    this.database,
+                    `DELETE FROM fudaba_card_pages
+                      WHERE card_id=? AND queue='pending'`,
+                    [input.cardId],
+                );
+                return this.savedCardResult(saved, null);
+            }
             return this.cardWriteFailure(
                 await this.findActiveCardForOwner(
                     input.cardId,
@@ -5262,37 +5224,61 @@ export class SqlFudabaRepository implements FudabaRepository {
     ): Promise<void> {
         const payload = pendingPayloadValue(reviewed.pending_payload);
         if (!payload) throw new Error("Staged revision lost its payload");
-        const frontKey = reviewed.pending_front_object_key ?? reviewed.front_object_key;
-        const backKey = reviewed.pending_back_object_key ?? reviewed.back_object_key;
-        if (frontKey !== reviewed.front_object_key)
-            replacedObjectKeys.push(reviewed.front_object_key);
-        if (backKey !== null && backKey !== reviewed.back_object_key)
-            replacedObjectKeys.push(reviewed.back_object_key ?? '');
-        const middleKeys = reviewed.pending_middle_object_keys ?? [];
-        const liveMiddleKeys =
-            (await this.listCardMiddleMediaFrom(database, [reviewed.id])).get(
-                reviewed.id,
-            ) ?? [];
-        for (const key of liveMiddleKeys) {
-            if (!middleKeys.includes(key)) replacedObjectKeys.push(key);
+        const pageRows = await queryAll<{
+            queue: 'live' | 'pending';
+            page_id: string;
+            object_version: string;
+            object_queue: 'live' | 'pending';
+            width: number | string;
+            height: number | string;
+        }>(
+            database,
+            `SELECT queue, page_id, object_version, object_queue, width, height
+               FROM fudaba_card_pages
+              WHERE card_id=?
+              ORDER BY queue, display_order`,
+            [reviewed.id],
+        );
+        const livePages = pageRows.filter((row) => row.queue === 'live');
+        const pendingPages = pageRows.filter((row) => row.queue === 'pending');
+        if (pendingPages.length > 0) {
+            // 待审页集是完整的。旧线上对象只有在新的页集里完全不再出现时才
+            // 作废；例如旧正面被搬到中间页时，它的对象仍被新页集引用，不能
+            // 当作“已替换”删掉。
+            const nextKeys = new Set(
+                pendingPages.map((row) =>
+                    cardPageObjectKey(
+                        reviewed.id,
+                        row.object_queue,
+                        row.page_id,
+                        row.object_version,
+                    ),
+                ),
+            );
+            for (const row of livePages) {
+                const previous = cardPageObjectKey(
+                    reviewed.id,
+                    row.object_queue,
+                    row.page_id,
+                    row.object_version,
+                );
+                if (!nextKeys.has(previous)) replacedObjectKeys.push(previous);
+            }
         }
         await executeSql(
             database,
             `UPDATE fudaba_cards
-             SET producer_name=?, front_object_key=?, back_object_key=?,
+             SET producer_name=?,
                  bio=?, trade_note=?, exchange_mode=?, made_on=?, group_name=?,
                  producer_reading=?,
                  is_original=?, made_with_ai=?, visible=?,
                  publication_status='published',
                  review_status=NULL, review_reason=NULL, review_submitted_at=NULL,
-                 pending_payload=NULL, pending_front_object_key=NULL,
-                 pending_middle_object_keys='{}', pending_back_object_key=NULL,
+                 pending_payload=NULL,
                  revision=revision+1, updated_at=?
              WHERE id=?`,
             [
                 payload.producer_name,
-                frontKey,
-                backKey,
                 payload.bio,
                 payload.trade_note,
                 payload.exchange_mode,
@@ -5306,28 +5292,36 @@ export class SqlFudabaRepository implements FudabaRepository {
                 reviewed.id,
             ],
         );
-        // 待审修订一旦通过，它暂存的整套页就是线上页：先清掉旧 live 页，
-        // 再把 pending 页整体提升为 live，媒体路由才不会继续读到旧版本。
-        const pendingPages = await queryAll<{ page_id: string }>(
-            database,
-            `SELECT page_id FROM fudaba_card_pages
-              WHERE card_id=? AND queue='pending'`,
-            [reviewed.id],
-        );
+        // 待审页集就是批准后的完整线上页序，整组替换 live 页行即可，不能只把
+        // pending 行改 queue，否则被保留的 live 页行会丢失。逐行保留各自的
+        // object_queue：未变化页仍指向 live 对象，新上传页指向批准时已发布的
+        // pending 对象。
         if (pendingPages.length > 0) {
             await executeSql(
                 database,
-                `DELETE FROM fudaba_card_pages
-                  WHERE card_id=? AND queue='live'`,
+                `DELETE FROM fudaba_card_pages WHERE card_id=?`,
                 [reviewed.id],
             );
-            await executeSql(
-                database,
-                `UPDATE fudaba_card_pages
-                    SET queue='live', updated_at=?
-                  WHERE card_id=? AND queue='pending'`,
-                [reviewedAt, reviewed.id],
-            );
+            for (const [index, row] of pendingPages.entries()) {
+                await executeSql(
+                    database,
+                    `INSERT INTO fudaba_card_pages
+                     (card_id, queue, page_id, display_order, object_version,
+                      object_queue, width, height, created_at, updated_at)
+                     VALUES (?, 'live', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        reviewed.id,
+                        row.page_id,
+                        index + 1,
+                        row.object_version,
+                        row.object_queue,
+                        Number(row.width),
+                        Number(row.height),
+                        reviewedAt,
+                        reviewedAt,
+                    ],
+                );
+            }
         }
         await this.replaceCardCredits(database, reviewed.id, payload.credits ?? []);
         // Favourites live in their own table, so the published selection is only
@@ -5556,8 +5550,6 @@ export class SqlFudabaRepository implements FudabaRepository {
                                  WHEN exchange_mode='none' THEN 'manual'
                                  ELSE exchange_mode
                              END,
-                             front_object_key=COALESCE(CAST(? AS text), front_object_key),
-                             back_object_key=COALESCE(CAST(? AS text), back_object_key),
                              accent=COALESCE(CAST(? AS text), accent),
                              legacy_card_id=card_number,
                              publication_status='published',
@@ -5583,6 +5575,7 @@ export class SqlFudabaRepository implements FudabaRepository {
                            AND NOT EXISTS (
                                SELECT 1 FROM fudaba_cards bound
                                WHERE bound.legacy_card_id=target.card_number
+                                 AND bound.id<>target.id
                            )
                          RETURNING ${CARD_COLUMNS}`,
                             )
@@ -5598,8 +5591,6 @@ export class SqlFudabaRepository implements FudabaRepository {
                                 this.bindBoolean(payload.isGroupCard === true),
                                 "madeOn" in payload ? 1 : 0,
                                 payload.madeOn ?? null,
-                                input.media!.frontObjectKey,
-                                input.media!.backObjectKey,
                                 input.media!.accent,
                                 input.reviewedAt,
                                 input.claimId,
@@ -5610,7 +5601,7 @@ export class SqlFudabaRepository implements FudabaRepository {
                         const saved = updated.results[0];
                         if (!saved) return { status: "unavailable" };
                         if (input.media?.pages?.length) {
-                            await this.syncCardPages(
+                            await syncNamecardPages(
                                 database,
                                 saved.id,
                                 "live",
@@ -5990,8 +5981,6 @@ export class SqlFudabaRepository implements FudabaRepository {
                          SET producer_name=CASE WHEN ? THEN ? ELSE producer_name END,
                              group_name=CASE WHEN ? THEN ? ELSE group_name END,
                              is_group_card=CASE WHEN ? THEN ? ELSE is_group_card END,
-                             front_object_key=CASE WHEN ? THEN ? ELSE front_object_key END,
-                             back_object_key=CASE WHEN ? THEN ? ELSE back_object_key END,
                              revision=revision+1,
                              updated_at=?
                          WHERE id=? AND owner_account_id IS NULL
@@ -6005,10 +5994,6 @@ export class SqlFudabaRepository implements FudabaRepository {
                             locked.payload.groupName ?? null,
                             "isGroupCard" in locked.payload ? 1 : 0,
                             this.bindBoolean(locked.payload.isGroupCard === true),
-                            input.media ? 1 : 0,
-                            input.media?.frontObjectKey ?? null,
-                            input.media ? 1 : 0,
-                            input.media?.backObjectKey ?? null,
                             input.reviewedAt,
                             locked.card_id,
                             locked.base_revision,
@@ -6022,7 +6007,7 @@ export class SqlFudabaRepository implements FudabaRepository {
                         };
                     }
                     if (input.media?.pages?.length) {
-                        await this.syncCardPages(
+                        await syncNamecardPages(
                             database,
                             updated.id,
                             "live",

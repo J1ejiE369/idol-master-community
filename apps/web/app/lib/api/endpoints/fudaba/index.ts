@@ -57,7 +57,6 @@ import {
   fudabaErrorResponseSchema,
   fudabaCardFieldsRequestSchema,
   fudabaCardInteractionKindSchema,
-
   fudabaCardPlacementDeleteRequestSchema,
   fudabaCardUpdateRequestSchema,
   fudabaCardInteractionResponseSchema,
@@ -233,9 +232,7 @@ export type CreateFudabaCardInput = z.input<typeof fudabaCardCreateSchema> & {
   back?: File | undefined
   /** Everything between the front and the back, in display order. */
   images?: readonly File[] | undefined
-  rotations?:
-    | { front?: number; back?: number; middles?: number[] }
-    | undefined
+  rotations?: { front?: number; back?: number; middles?: number[] } | undefined
 }
 
 export type UpdateFudabaCardInput = z.input<

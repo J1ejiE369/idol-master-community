@@ -18,6 +18,7 @@ import type {
     FudabaPublicWallRecord,
 } from '@/ports/repositories/fudaba';
 import type { ManagedSqlDatabase, SqlDatabase } from '@/infra/db/sql/database';
+import { cardPageObjectKey } from '@/utils/storage/business-object-keys';
 import { executeSql, queryAll, queryOne } from '@/infra/db/sql/query';
 
 function cardLabel(card: { producer_name: string }): string {
@@ -933,13 +934,9 @@ export class SqlFudabaMessageRepository implements FudabaMessagesRepository {
         const mediaVersionById = new Map(
             mediaVersions.map((row) => [row.id, row.revision])
         );
-        const keys = items.flatMap((item) =>
-            item.kind === 'card'
-                ? [
-                      item.card.front_object_key,
-                      ...(includeBack && item.card.back_object_key ? [item.card.back_object_key] : []),
-                  ]
-                : []
+        const liveMedia = await this.liveMedia(this.database, cardIds);
+        const keys = [...liveMedia.values()].flatMap((pages) =>
+            includeBack && pages.length > 1 ? [pages[0]!, pages.at(-1)!] : [pages[0]!]
         );
         const previews = keys.length
             ? await queryAll<{
@@ -966,7 +963,9 @@ export class SqlFudabaMessageRepository implements FudabaMessagesRepository {
                     contentRevision: item.message.contentRevision,
                 };
             const card = item.card;
-            const preview = byKey.get(card.front_object_key);
+            const pages = liveMedia.get(card.id) ?? [];
+            const preview = byKey.get(pages[0] ?? '');
+            const backPreview = pages.length > 1 ? byKey.get(pages.at(-1)!) : undefined;
             return {
                 kind: 'card' as const,
                 id: card.id,
@@ -987,15 +986,37 @@ export class SqlFudabaMessageRepository implements FudabaMessagesRepository {
                 preview: preview?.preview_data_url ?? null,
                 ...(includeBack
                     ? {
-                          backPreview:
-                              (card.back_object_key
-                                  ? byKey.get(card.back_object_key)?.preview_data_url
-                                  : null) ?? null,
+                          backPreview: backPreview?.preview_data_url ?? null,
                       }
                     : {}),
                 assetVersion: String(mediaVersionById.get(card.id) ?? 0),
             };
         });
+    }
+
+    private async liveMedia(database: SqlDatabase, cardIds: string[]) {
+        if (!cardIds.length) return new Map<string, string[]>();
+        const rows = await queryAll<{
+            card_id: string;
+            page_id: string;
+            object_queue: string;
+            object_version: string;
+        }>(
+            database,
+            `SELECT card_id, page_id, object_queue, object_version
+             FROM fudaba_card_pages WHERE queue = 'live'
+             AND card_id IN (${cardIds.map(() => '?').join(',')})
+             ORDER BY card_id, display_order`,
+            cardIds
+        );
+        const keys = new Map<string, string[]>();
+        for (const row of rows) {
+            const key = cardPageObjectKey(row.card_id, row.object_queue, row.page_id, row.object_version);
+            const pages = keys.get(row.card_id) ?? [];
+            pages.push(key);
+            keys.set(row.card_id, pages);
+        }
+        return keys;
     }
 
     async saveMediaPreview(
@@ -1007,24 +1028,18 @@ export class SqlFudabaMessageRepository implements FudabaMessagesRepository {
         return this.database.transaction(async (database) => {
             const card = await queryOne<{
                 revision: number;
-                front_object_key: string;
-                back_object_key: string | null;
                 deleted_at: string | null;
             }>(
                 database,
-                'SELECT revision, front_object_key, back_object_key, deleted_at FROM fudaba_cards WHERE id = ? FOR UPDATE',
+                'SELECT revision, deleted_at FROM fudaba_cards WHERE id = ? FOR UPDATE',
                 [guard.cardId]
             );
-            if (
-                !card ||
-                card.deleted_at ||
-                card.revision !== guard.revision ||
-                (guard.side === 'front'
-                    ? card.front_object_key
-                    : card.back_object_key) !== objectKey
-            ) {
-                return false;
-            }
+            if (!card || card.deleted_at || card.revision !== guard.revision) return false;
+            const pages = (await this.liveMedia(database, [guard.cardId])).get(guard.cardId) ?? [];
+            const expectedKey = guard.side === 'front'
+                ? pages[0]
+                : pages.length > 1 ? pages.at(-1) : undefined;
+            if (expectedKey !== objectKey) return false;
             if (!preview) {
                 await executeSql(
                     database,
@@ -1119,7 +1134,19 @@ export class SqlFudabaMessageRepository implements FudabaMessagesRepository {
             `SELECT DISTINCT ON (asset.object_key)
             asset.object_key, card.id AS card_id, card.revision, asset.side
             FROM fudaba_cards card
-            CROSS JOIN LATERAL (VALUES ('front', card.front_object_key), ('back', card.back_object_key)) AS asset(side, object_key)
+            JOIN LATERAL (
+                SELECT CASE WHEN position = 1 THEN 'front' ELSE 'back' END AS side,
+                       'community/fudaba/cards/' || card.id || '/' || page.object_queue || '/' ||
+                           page.page_id || '.' || page.object_version || '.webp' AS object_key
+                FROM (
+                    SELECT page_id, object_queue, object_version,
+                           row_number() OVER (ORDER BY display_order) AS position,
+                           count(*) OVER () AS page_count
+                    FROM fudaba_card_pages
+                    WHERE card_id = card.id AND queue = 'live'
+                ) page
+                WHERE position = 1 OR position = page_count
+            ) AS asset ON TRUE
             LEFT JOIN fudaba_card_media_previews preview ON preview.object_key = asset.object_key
             WHERE card.deleted_at IS NULL AND asset.object_key > ? AND preview.object_key IS NULL
             ORDER BY asset.object_key, card.id, asset.side LIMIT ?`,

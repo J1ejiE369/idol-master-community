@@ -19,6 +19,7 @@ import { SqlStoryRepository } from '@/infra/db/repositories/story-repository';
 import { PostgresqlSchemaStrategy } from '@/infra/db/postgresql/schema-strategy';
 import { queryOne } from '@/infra/db/sql/query';
 import { assertContractJson } from '../contracts/contract-json';
+import { cardPageWrite } from '../fixtures/owner-route-fixture';
 import { insertPlatformAccount } from '../fixtures/rows';
 import { createWikiFixture } from '../wiki/fixture';
 import { deleteObjectWithCompensation } from '@/utils/storage/delete-object';
@@ -546,7 +547,7 @@ describe.skipIf(!postgresIntegrationEnabled())(
                 producerName: '测试制作人',
                 seriesCodes: ['catalog-one'],
                 favoriteCharacterIds: [characterId],
-                frontObjectKey: 'catalog/test.webp',
+                pages: [cardPageWrite('front')],
                 bio: '',
                 tradeNote: '',
                 exchangeMode: 'none',
@@ -1027,7 +1028,7 @@ describe.skipIf(!postgresIntegrationEnabled())(
                 producerName: '测试制作人',
                 seriesCodes: ['catalog-one'],
                 favoriteCharacterIds: [characterId],
-                frontObjectKey: 'catalog/tests/front.webp',
+                pages: [cardPageWrite('front')],
                 bio: '',
                 tradeNote: '',
                 exchangeMode: 'none',

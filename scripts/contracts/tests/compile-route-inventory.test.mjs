@@ -141,26 +141,30 @@ test.describe('route inventory compiler', () => {
     ));
 
     assert.deepEqual(current.counts, {
-      mountedRegistrations: 422,
-      mountedMethodPaths: 323,
-      noInputRoutes: 99,
-      requestCarriers: 434,
-      policies: {
-        reject: 102,
-        "accept-and-project": 217,
-        passthrough: 17,
-        "non-object-applicable": 98,
+      "mountedRegistrations": 417,
+      "mountedMethodPaths": 318,
+      "noInputRoutes": 99,
+      "requestCarriers": 426,
+      "policies": {
+        "reject": 102,
+        "accept-and-project": 210,
+        "passthrough": 17,
+        "non-object-applicable": 97
       },
-      responses: { total: 869, json: 787, nonJson: 82 },
-      unresolved: 0,
+      "responses": {
+        "total": 845,
+        "json": 786,
+        "nonJson": 59
+      },
+      "unresolved": 0
     });
     assert.deepEqual(current.baseline, {
-      mountedMethodPaths: 294, carriers: 372, reject: 82, acceptAndProject: 188,
-      passthrough: 17, nonObjectApplicable: 85,
+      mountedMethodPaths: 289, carriers: 367, reject: 82, acceptAndProject: 184,
+      passthrough: 17, nonObjectApplicable: 84,
     });
     assert.deepEqual(current.reconciliation.baselineCompatible, {
-      mountedMethodPaths: 294, requestCarriers: 372,
-      policies: { reject: 82, "accept-and-project": 188, passthrough: 17, "non-object-applicable": 85 },
+      mountedMethodPaths: 289, requestCarriers: 367,
+      policies: { reject: 82, "accept-and-project": 184, passthrough: 17, "non-object-applicable": 84 },
     });
     assert.deepEqual(current.reconciliation.explicitAdminAdditions, [
       { module: "@imsweb/contracts/catalog", symbol: "adminCatalogStoryTargetRequestSchema", kind: "json", method: "POST", path: "/api/admin/catalog/story-target", carriers: 1, policy: "reject", actualCarriers: 1 },

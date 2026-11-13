@@ -74,6 +74,11 @@ test.skipIf(!postgresIntegrationEnabled())(
                 '20261108120100_fudaba_message_wall_v2',
                 '20261108120200_fudaba_wall_scene',
                 '20261108120300_fudaba_preview_invalidation',
+                '20261112120000_namecard_media_retire',
+                '20261112130000_namecard_page_object_queue',
+                '20261112135000_fudaba_retire_legacy_preview_triggers',
+                '20261112140000_namecard_retire_card_key_columns',
+                '20261113100000_fudaba_page_preview_invalidation',
 
             ]);
             const current = (

@@ -1038,7 +1038,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
             position_x: 12.5,
             position_y: 87.25,
             rotation: -4.5,
-            z_index: 8,
+            z_index: 1,
             revision: 0,
             updated_at: CREATED_AT
         });
@@ -1096,7 +1096,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
             position_x: 100,
             position_y: 0,
             rotation: 12,
-            z_index: 999,
+            z_index: 2,
             revision: 1,
             updated_at: UPDATED_AT
         });
@@ -1442,6 +1442,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
     function placementBody(expectedRevision: number | null): Record<string, unknown> {
         return {
+            layoutVersion: 1,
             x: 25.5,
             y: 74.5,
             rotation: -3,
@@ -1452,10 +1453,22 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
     function path(cardId = CARD_ID): string {
         return `/api/community/exchange/offices/${OFFICE_ID}` +
-            `/cards/${cardId}/placement`;
+            `/cards/${cardId}/world-placement`;
     }
 
     test.describe('card placement', () => {
+        test('legacy percentage writes fail with a layout conflict without changing a placement', async () => {
+            const fixture = new PlacementRouteFixture();
+            const response = await fixture.app.request('http://ims.test' + path().replace('/world-placement', '/placement'), {
+                method: 'PUT',
+                headers: bearerHeaders({ 'content-type': 'application/json' }),
+                body: JSON.stringify({ x: 50, y: 50, rotation: 0, zIndex: 1, expectedRevision: null })
+            });
+            assert.equal(response.status, 409);
+            assert.equal((await response.json() as { code: string }).code, 'FUDABA_WALL_LAYOUT_CONFLICT');
+            assert.equal(fixture.placements.size, 0);
+        });
+
         test('routes enforce write gate, Platform auth, active status, CSRF, and rate limit',
             async () => {
                 const disabled = new PlacementRouteFixture({ writeEnabled: false });
@@ -1489,7 +1502,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
 
                 const limited = new PlacementRouteFixture();
                 limited.rateLimiter.deniedBuckets.add('platform-write-account');
-                assert.equal((await limited.app.request(`http://ims.test${path()}`, {
+                assert.equal((await limited.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 0 })
@@ -1538,8 +1551,8 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                 assert.equal((await duplicate.json() as { revision: number }).revision, 0);
 
                 for (const invalid of [
-                    { ...placementBody(0), x: -0.01 },
-                    { ...placementBody(0), y: 100.01 },
+                    { ...placementBody(0), x: -1_000_000.01 },
+                    { ...placementBody(0), y: 1_000_000.01 },
                     { ...placementBody(0), rotation: 12.01 },
                     { ...placementBody(0), zIndex: 1.5 },
                     { ...placementBody(0), expectedRevision: '0' },
@@ -1565,6 +1578,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                     method: 'PUT',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({
+                        layoutVersion: 1,
                         x: 0,
                         y: 100,
                         rotation: 12,
@@ -1652,7 +1666,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                 assert.equal(closedUpdate.status, 404);
                 assert.deepEqual(await closedUpdate.json(), notFound);
 
-                const removed = await fixture.app.request(`http://ims.test${path()}`, {
+                const removed = await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 0 })
@@ -1673,20 +1687,20 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                     body: JSON.stringify(placementBody(null))
                 })).status, 201);
 
-                const stale = await fixture.app.request(`http://ims.test${path()}`, {
+                const stale = await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 2 })
                 });
                 assert.equal(stale.status, 409);
                 assert.equal((await stale.json() as { revision: number }).revision, 0);
-                assert.equal((await fixture.app.request(`http://ims.test${path()}`, {
+                assert.equal((await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: '0' })
                 })).status, 400);
 
-                const removed = await fixture.app.request(`http://ims.test${path()}`, {
+                const removed = await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: {
                         ...cookieHeaders(true),
@@ -1699,7 +1713,7 @@ async function seedPublishedOfficeFixture(database: ManagedSqlDatabase, officeId
                     success: true,
                     revision: 1
                 });
-                assert.equal((await fixture.app.request(`http://ims.test${path()}`, {
+                assert.equal((await fixture.app.request(`http://ims.test${path().replace('/world-placement', '/placement')}`, {
                     method: 'DELETE',
                     headers: bearerHeaders({ 'content-type': 'application/json' }),
                     body: JSON.stringify({ expectedRevision: 1 })

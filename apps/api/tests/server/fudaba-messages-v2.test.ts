@@ -1252,8 +1252,17 @@ test('late previews cannot restore stale media after a concurrent replacement', 
         "INSERT INTO fudaba_card_series(card_id,series_code,display_order) VALUES('race-card','765',1)"
     ).run();
     await seedFrontPages(database, 'race-card');
+    await database.prepare(
+        `INSERT INTO fudaba_card_pages
+        (card_id, queue, object_queue, page_id, display_order, object_version, width, height, created_at, updated_at)
+        VALUES ('race-card', 'pending', 'pending', 'front', 1, '22222222-2222-4222-8222-222222222222', 240, 160, ?, ?)`
+    ).bind(now, now).run();
     const preview = 'data:image/webp;base64,UklGRg==';
     const guard = { cardId: 'race-card', revision: 0, side: 'front' as const };
+    const pendingKey = 'community/fudaba/cards/race-card/pending/front.22222222-2222-4222-8222-222222222222.webp';
+    assert.equal(await repo.messages.saveMediaPreview(pendingKey, 'pending', preview, guard), false);
+    const backfill = await repo.messages.listPreviewBackfill('', 100);
+    assert.deepEqual(backfill.map(({ objectKey }) => objectKey), [objectKey]);
     assert.equal(
         await repo.messages.saveMediaPreview(objectKey, 'old', preview, guard),
         true

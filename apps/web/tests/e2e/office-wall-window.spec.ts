@@ -44,7 +44,6 @@ test("loads the complete wall observation area and replaces distant content with
     seriesCodes: ["765"],
     favoriteCharacters: [],
     frontImageUrl: "/brand/series/wall/765pro.webp",
-    middleImageUrls: [],
     backImageUrl: "/brand/series/wall/765pro.webp",
     accent: "#f34e6c",
     bio: "",

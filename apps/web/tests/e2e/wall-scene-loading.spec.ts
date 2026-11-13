@@ -124,7 +124,6 @@ test("全墙1000占位、远处逐物件加载、定位选择与动态便签 @mo
         seriesCodes: ["765"],
         favoriteCharacters: [{ id: 1, name: "天海春香", seriesCode: "765" }],
         frontImageUrl: `/__scene_media__/card-${index}.webp`,
-        middleImageUrls: [],
         backImageUrl: `/__scene_media__/back-${index}.webp`,
         accent: "#ef92ac",
         bio: "渐进加载",

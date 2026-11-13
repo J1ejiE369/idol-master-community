@@ -1302,7 +1302,41 @@ test("offers office creation at a right-clicked position and keyboard-selected m
           styleUrl: "/maps/exchange-test-style.json",
         },
       }),
-    "GET"
+    "GET",
+    2
+  )
+  await api.mock(
+    {
+      method: "GET",
+      path: "/api/community/exchange/places/reverse",
+      times: 1,
+    },
+    (route) => {
+      const query = new URL(route.request().url()).searchParams
+      const point = {
+        longitude: Number(query.get("longitude")),
+        latitude: Number(query.get("latitude")),
+      }
+      expect(Number.isFinite(point.longitude)).toBe(true)
+      expect(Number.isFinite(point.latitude)).toBe(true)
+      expect(Math.abs(point.longitude)).toBeLessThanOrEqual(180)
+      expect(Math.abs(point.latitude)).toBeLessThanOrEqual(90)
+      return route.fulfill({
+        json: {
+          place: {
+            id: "map-create-reverse",
+            label: "所选位置",
+            city: "上海",
+            address: "地图所选位置地址",
+            location: { ...point, precision: "exact" },
+          },
+          attribution: {
+            text: "© OpenStreetMap contributors",
+            url: "https://www.openstreetmap.org/copyright",
+          },
+        },
+      })
+    }
   )
   await api.mockRoute(
     "**/api/community/exchange/map/offices?*",
@@ -1338,4 +1372,10 @@ test("offers office creation at a right-clicked position and keyboard-selected m
   await expect(page).toHaveURL(/\/account\/me\/offices\?create=[\w-]+$/)
   await expect.poll(() => writtenCreateIntent).not.toBeNull()
   expect(JSON.parse(writtenCreateIntent ?? "null")?.target.kind).toBe("wgs84")
+  await expect(
+    page
+      .getByRole("dialog", { name: "新建事务所" })
+      .getByRole("textbox", { name: "事务所名称", exact: true })
+  ).toBeVisible()
+  await expect(page.getByText(/地图所选位置地址/)).toBeVisible()
 })
